@@ -1,0 +1,46 @@
+AI Agent Fanpage (7 ngày là ra tiền)
+
+Tập trung vào 4 chức năng dân bán hàng cần nhất.
+
+🟥 1. Tính năng chính (phiên bản đủ để bán)
+
+Đây là 4 tính năng đủ để người dùng trả 1–3 triệu/tháng:
+
+⭐ 1) Auto Reply Comment (AI)
+
+đọc comment
+
+phân loại: hỏi giá / spam / chửi / quan tâm / từ khóa cấm
+
+AI tự viết câu trả lời tự nhiên
+
+auto ẩn comment chứa sđt
+
+báo cáo cuối ngày: bao nhiêu comment, bao nhiêu khách quan tâm
+
+⭐ 2) Auto Inbox khách
+
+khi có comment chứa ý định mua
+→ Agent tự mở inbox
+→ nhắn tin theo kịch bản AI tùy ngữ cảnh
+→ theo dõi xem khách có trả lời không
+
+⭐ 3) Auto viết caption + đăng bài
+
+user nhập 1 câu: “son môi màu đỏ”
+→ AI viết 3 caption quảng cáo
+→ dùng API (hoặc automation) đăng lên fanpage
+→ auto thêm emoji
+→ auto thêm hashtag phù hợp ngành hàng
+
+⭐ 4) Báo cáo tự động
+
+tổng hợp comment
+
+số khách quan tâm
+
+nội dung hot
+
+top câu hỏi nhiều
+
+dự đoán insight khách hàng

@@ -1,0 +1,16 @@
+{
+    "page_id": "${PAGE_ID}",
+    "cookie_path": "cookies.json",
+    "interval_seconds": 90,
+    "max_actions_per_cycle": 20,
+    "demo": false,
+    "llm_provider": "openai",
+    "openai_api_key": "${OPENAI_API_KEY}",
+    "openai_model": "gpt-4o-mini",
+    "report_dir": "reports",
+    "timezone": "Asia/Ho_Chi_Minh",
+    "log_level": "INFO",
+    "graph_access_token": "${GRAPH_ACCESS_TOKEN}",
+    "graph_version": "v24.0",
+    "headless": false
+}

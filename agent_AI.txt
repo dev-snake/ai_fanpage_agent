@@ -1,0 +1,98 @@
+ ┌─────────────────────┐
+ │        START                │
+ └─────────┬───────────┘
+           ↓
+ ┌─────────────────────┐
+ │ Load/Login FB               │
+ └─────────┬───────────┘
+           ↓
+ ┌─────────────────────┐
+ │ Fetch New Comments          │
+ └─────────┬───────────┘
+           ↓
+ ┌─────────────────────┐
+ │ AI Classify Intent          │
+ └─────────┬───────────┘
+           ↓
+ ┌──────────────────────────────────┐
+ │ ACTION DECISION                               │
+ │ - reply                                       │
+ │ - hide                                        │
+ │ - inbox                                       │
+ │ - ignore                                      │
+ └─────────┬────────────────────────┘
+           ↓
+ ┌─────────────────────┐
+ │ Execute via Browser         │
+ └─────────┬───────────┘
+           ↓
+ ┌─────────────────────┐
+ │ Update Logs/Memory          │
+ └─────────┬───────────┘
+           ↓
+  Re-run Every 1–3 Minutes
+
+
+1) Login Facebook
+
+Load cookie
+
+Nếu cookie lỗi → đăng nhập lại
+→ Xong.
+
+2) Chọn Fanpage
+
+Lấy danh sách fanpage user đang quản lý
+
+User chọn 1 page
+→ Agent sẽ chỉ xử lý page này.
+
+3) Lấy comment mới
+
+Quét bài viết mới nhất
+
+Lấy comment mới nhất
+
+Lọc comment chưa xử lý
+
+4) AI hiểu comment
+
+AI phân loại comment thành:
+
+hỏi giá
+
+quan tâm mua
+
+spam
+
+chửi / tiêu cực
+
+chứa số điện thoại
+
+Sau đó AI tự quyết định phải làm gì.
+
+5) Thực thi hành động
+
+Agent dùng trình duyệt automation để:
+
+trả lời comment
+
+ẩn comment chứa số điện thoại
+
+mở inbox để nhắn khách
+
+đăng bài mới bằng caption AI viết
+
+6) Báo cáo cuối ngày
+
+Tối hôm đó:
+
+tổng số comment
+
+số comment quan tâm
+
+số comment bị ẩn
+
+khách nào đã inbox
+
+đề xuất nội dung mai đăng
