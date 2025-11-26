@@ -1068,5 +1068,15 @@
       "hide"
     ],
     "detail": "graph hide ok"
+  },
+  {
+    "comment_id": "122094635487145140_1482538732829822",
+    "author": "Unknown",
+    "avatar_url": null,
+    "intent": "unknown",
+    "actions": [
+      "reply"
+    ],
+    "detail": "graph reply ok"
   }
 ]

@@ -24,6 +24,7 @@ class ActionExecutor:
         self.inbox = InboxService(logger=self.logger)
         self.post_service = PostService(logger=self.logger)
         self.context = context
+        self.graph_version = settings.get("graph_version", "v17.0")
 
     def execute(self, comment: Comment, decision: Decision) -> List[str]:
         details: List[str] = []
@@ -42,7 +43,7 @@ class ActionExecutor:
         token = self.settings.get("graph_access_token")
         if not token:
             return "missing graph_access_token"
-        url = f"https://graph.facebook.com/v17.0/{comment.id}/comments"
+        url = f"https://graph.facebook.com/{self.graph_version}/{comment.id}/comments"
         resp = requests.post(url, params={"access_token": token, "message": text})
         if resp.ok:
             return "graph reply ok"
@@ -52,7 +53,7 @@ class ActionExecutor:
         token = self.settings.get("graph_access_token")
         if not token:
             return "missing graph_access_token"
-        url = f"https://graph.facebook.com/v17.0/{comment.id}"
+        url = f"https://graph.facebook.com/{self.graph_version}/{comment.id}"
         resp = requests.post(url, params={"access_token": token, "is_hidden": "true"})
         if resp.ok:
             return "graph hide ok"

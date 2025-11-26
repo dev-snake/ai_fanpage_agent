@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 from dataclasses import dataclass
 from enum import Enum
@@ -44,6 +45,19 @@ KEYWORDS: Dict[Intent, List[str]] = {
 }
 
 
+def _resolve_openai_key(settings: dict, logger: logging.Logger) -> Optional[str]:
+    """Resolve OpenAI API key, skipping obvious placeholders."""
+    key = (settings.get("openai_api_key") or os.getenv("OPENAI_API_KEY") or "").strip()
+    if not key:
+        logger.warning("OPENAI_API_KEY missing; fallback to heuristic intent.")
+        return None
+    if key.startswith("${") or "OPENAI_API_KEY" in key or key.startswith("{"):
+        logger.warning("OPENAI_API_KEY looks like a placeholder; update .env/config.")
+        return None
+    os.environ.setdefault("OPENAI_API_KEY", key)
+    return key
+
+
 def heuristic_classify(message: str) -> Tuple[Intent, float, str]:
     text = message.lower()
     for intent, words in KEYWORDS.items():
@@ -80,19 +94,31 @@ def generate_reply(intent: Intent, comment: Comment) -> Optional[str]:
 
 
 def llm_classify(message: str, settings: dict, logger: logging.Logger) -> Optional[Tuple[Intent, float, str]]:
-    if not settings.get("openai_api_key") or settings.get("llm_provider") != "openai":
+    if settings.get("llm_provider") != "openai":
         return None
     try:
-        from openai import OpenAI
+        from openai import AuthenticationError, OpenAI, OpenAIError
     except ImportError:
         logger.warning("openai package missing, fallback to rules.")
         return None
 
-    client = OpenAI(api_key=settings.get("openai_api_key"))
+    api_key = _resolve_openai_key(settings, logger)
+    if not api_key:
+        return None
+
+    try:
+        client = OpenAI(
+            api_key=api_key,
+            default_headers={"Authorization": f"Bearer {api_key}"},
+        )
+    except OpenAIError as exc:  # pragma: no cover
+        logger.error("LLM client init failed: %s", exc)
+        return None
+
     prompt = (
-        "Bạn là bộ phân loại intent cho bình luận Facebook bán hàng. "
-        "Intent hợp lệ: ask_price, interest, spam, abuse, missing_phone. "
-        "Trả JSON: {intent, confidence, reason}."
+        "B?n l� b? ph�n lo?i intent cho b�nh lu?n Facebook b�n h�ng. "
+        "Intent h?p l?: ask_price, interest, spam, abuse, missing_phone. "
+        "Tr? JSON: {intent, confidence, reason}."
     )
     try:
         res = client.chat.completions.create(
@@ -102,13 +128,17 @@ def llm_classify(message: str, settings: dict, logger: logging.Logger) -> Option
                 {"role": "system", "content": prompt},
                 {"role": "user", "content": message},
             ],
+            extra_headers={"Authorization": f"Bearer {api_key}"},
         )
         content = res.choices[0].message.content or ""
-        match_intent = re.search(r"intent\\s*[:=]\\s*(\\w+)", content)
-        match_conf = re.search(r"confidence\\s*[:=]\\s*([0-9.]+)", content)
+        match_intent = re.search(r"intent\s*[:=]\s*(\w+)", content)
+        match_conf = re.search(r"confidence\s*[:=]\s*([0-9.]+)", content)
         intent = Intent(match_intent.group(1)) if match_intent else Intent.UNKNOWN
         confidence = float(match_conf.group(1)) if match_conf else 0.55
         return intent, confidence, "llm"
+    except AuthenticationError as exc:  # pragma: no cover
+        logger.error("LLM classify failed: authentication error, check OPENAI_API_KEY. %s", exc)
+        return None
     except Exception as exc:  # pragma: no cover
         logger.error("LLM classify failed: %s", exc)
         return None

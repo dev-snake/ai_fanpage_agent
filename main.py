@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import sys
 from pathlib import Path
 from string import Template
 
@@ -53,11 +54,17 @@ def build_services(cfg: dict):
         headless=cfg.get("headless", False),
     )
     db = Database("data/actions.json")
-    processed_ids = {r.get("comment_id") for r in db.all() if isinstance(r, dict) and r.get("comment_id")}
+    processed_ids = {
+        r.get("comment_id")
+        for r in db.all()
+        if isinstance(r, dict) and r.get("comment_id")
+    }
     fetcher = CommentFetcher(cfg, logger, processed_ids=processed_ids)
     executor = ActionExecutor(cfg, logger)
     reporter = Reporter(cfg.get("report_dir", "reports"))
-    page_selector = PageSelector(logger, config_path=Path(cfg.get("config_path", "config.json")))
+    page_selector = PageSelector(
+        logger, config_path=Path(cfg.get("config_path", "config.json"))
+    )
     return logger, login_mgr, fetcher, executor, reporter, db, page_selector
 
 
@@ -108,7 +115,9 @@ def main() -> None:
     interval = args.interval or cfg.get("interval_seconds", 90)
     cfg["config_path"] = args.config
 
-    logger, login_mgr, fetcher, executor, reporter, db, page_selector = build_services(cfg)
+    logger, login_mgr, fetcher, executor, reporter, db, page_selector = build_services(
+        cfg
+    )
     services = (logger, login_mgr, fetcher, executor, reporter, db, page_selector)
 
     if cfg.get("demo", False):
@@ -116,7 +125,9 @@ def main() -> None:
     else:
         login_ok = login_mgr.login()
         if not login_ok:
-            logger.error("Login failed. Please ensure cookies.json is valid or log in once to refresh cookies.")
+            logger.error(
+                "Login failed. Please ensure cookies.json is valid or log in once to refresh cookies."
+            )
             return
 
         try:
@@ -129,7 +140,9 @@ def main() -> None:
             return
 
     if not cfg.get("graph_access_token") or "{" in cfg.get("graph_access_token", ""):
-        logger.warning("graph_access_token missing or placeholder; Graph API will fail. Set it via env/.env.")
+        logger.warning(
+            "graph_access_token missing or placeholder; Graph API will fail. Set it via env/.env."
+        )
     if not cfg.get("page_id") or "{" in cfg.get("page_id", ""):
         logger.warning("page_id missing or placeholder; set PAGE_ID env or config.")
 
@@ -147,4 +160,19 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    main()
+    # Check if running with command line arguments
+    if len(sys.argv) > 1:
+        # If arguments provided, run agent directly (CLI mode)
+        main()
+    else:
+        # Otherwise show modern PyQt6 UI (Postman-style)
+        try:
+            from ui.modern_ui import run as modern_ui_run
+
+            modern_ui_run()
+        except ImportError as e:
+            print(f"\n❌ Lỗi: Không thể khởi động UI. Vui lòng cài đặt PyQt6:")
+            print(f"   pip install PyQt6\n")
+            print(f"Chi tiết lỗi: {e}\n")
+        except Exception as e:
+            print(f"\n❌ Lỗi không mong đợi: {e}\n")
