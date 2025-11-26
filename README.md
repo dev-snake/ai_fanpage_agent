@@ -63,11 +63,33 @@ notepad .env  # Điền API keys
 -   **OPENAI_API_KEY**: Lấy từ https://platform.openai.com/api-keys
 -   **PAGE_ID**: Lấy từ fanpage → About → Page ID
 -   **GRAPH_ACCESS_TOKEN**: (Optional) Từ https://developers.facebook.com/tools/explorer/
+-   **FACEBOOK_APP_ID** & **FACEBOOK_APP_SECRET**: (Optional) Để tự động refresh token - Xem [TOKEN_REFRESH_GUIDE.md](TOKEN_REFRESH_GUIDE.md)
 
 ⚠️ **Quan trọng:**
 
 -   File `.env` chứa API keys → KHÔNG commit lên Git
 -   File `config.json` sử dụng `${VAR}` reference → Safe để commit
+
+## ✨ Tính năng mới: Auto-Refresh Token
+
+🔐 **Token tự động refresh khi hết hạn** - Không cần copy-paste thủ công nữa!
+
+### Trước (❌):
+
+```
+Error: Session has expired on Wednesday, 26-Nov-25
+→ Phải lên Graph API, copy token, paste vào config, restart
+```
+
+### Sau (✅):
+
+```
+Token hết hạn, đang thử refresh...
+✅ Refresh token thành công!
+→ Tự động xử lý, không downtime!
+```
+
+📖 **Chi tiết:** Xem [TOKEN_REFRESH_GUIDE.md](TOKEN_REFRESH_GUIDE.md)
 
 ## Chay thu nhanh
 
@@ -87,17 +109,11 @@ python main.py --demo --cycles 1 --interval 30
 2. Chon fanpage → xac dinh page lam viec. Gia lap: auto chon page demo; thuc te: goi Graph API (can `graph_access_token`) hoac truy cap /pages bang Playwright de lay danh sach, user chon va luu `page_id` vao `config.json`.
 3. Bat dau vong loop chinh → Fetch comment → AI hieu → Quyet dinh → Reply/Hide/Inbox/Post → Log → Sleep 1-3 phut → lap lai.
 
-## UI dashboard (tu chon)
-
--   Streamlit (web) khong cai san trong requirements de tranh loi pyarrow tren Python 3.14. Neu muon dung, khuyen nghi Python 3.10-3.12 va tu cai: `pip install streamlit==1.38.*` roi chay `streamlit run ui/dashboard.py`.
--   Agent: `python main.py --cycles 0`
--   Dashboard Streamlit doc truc tiep tu SQLite (`db/agent.db`).
-
 ## UI PyQt6 (desktop)
 
 -   Cai dep: `pip install -r requirements.txt`
--   Chay: `python -m ui.qt_dashboard`
--   Chuc nang: xem report moi nhat va log hanh dong trong cua so desktop, nut Reload de tai lai.
+-   Chay: `python main.py` (khong can tham so)
+-   Chuc nang: giao dien hien dai voi sidebar, dashboard, agent control, settings va history trong mot cua so duy nhat.
 
 ## Huong phat trien tiep
 

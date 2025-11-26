@@ -8,13 +8,25 @@ from typing import Dict, List, Optional
 import requests
 from playwright.sync_api import BrowserContext
 
+from .token_manager import TokenManager
+
 
 class PageSelector:
-    def __init__(self, logger: logging.Logger, config_path: Optional[Path] = None) -> None:
+    def __init__(
+        self,
+        logger: logging.Logger,
+        config_path: Optional[Path] = None,
+        token_manager: Optional[TokenManager] = None,
+    ) -> None:
         self.logger = logger.getChild("pages")
         self.config_path = config_path
+        self.token_manager = token_manager
 
     def list_pages_graph(self, token: str) -> List[Dict[str, str]]:
+        # Validate token trước khi sử dụng
+        if self.token_manager:
+            token = self.token_manager.get_valid_token() or token
+
         url = "https://graph.facebook.com/v17.0/me/accounts"
         resp = requests.get(url, params={"access_token": token})
         if not resp.ok:
@@ -22,11 +34,16 @@ class PageSelector:
         data = resp.json().get("data", [])
         return [{"id": p["id"], "name": p["name"]} for p in data]
 
-    def list_pages_playwright(self, context: Optional[BrowserContext]) -> List[Dict[str, str]]:
+    def list_pages_playwright(
+        self, context: Optional[BrowserContext]
+    ) -> List[Dict[str, str]]:
         if context is None:
             return []
         page = context.new_page()
-        page.goto("https://www.facebook.com/pages/?category=your_pages", wait_until="domcontentloaded")
+        page.goto(
+            "https://www.facebook.com/pages/?category=your_pages",
+            wait_until="domcontentloaded",
+        )
         page.wait_for_timeout(1000)
         items = page.query_selector_all("a[href*='/pages/'] div[role='heading']")
         pages: List[Dict[str, str]] = []
@@ -51,12 +68,16 @@ class PageSelector:
             return
         try:
             cfg["page_id"] = page_id
-            Path(self.config_path).write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+            Path(self.config_path).write_text(
+                json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
             self.logger.info("Saved selected page_id to %s", self.config_path)
         except Exception as exc:
             self.logger.warning("Could not persist page_id: %s", exc)
 
-    def list_pages(self, cfg: dict, context: Optional[BrowserContext]) -> List[Dict[str, str]]:
+    def list_pages(
+        self, cfg: dict, context: Optional[BrowserContext]
+    ) -> List[Dict[str, str]]:
         token = cfg.get("graph_access_token") or ""
         if token:
             try:
@@ -86,11 +107,15 @@ class PageSelector:
 
         pages = self.list_pages(cfg, context)
         if not pages:
-            raise RuntimeError("No fanpage found. Set page_id in config.json or provide Graph token / Playwright context.")
+            raise RuntimeError(
+                "No fanpage found. Set page_id in config.json or provide Graph token / Playwright context."
+            )
 
         if cfg.get("demo", False):
             chosen = pages[0]
-            self.logger.info("Auto-selected demo page: %s (%s)", chosen["name"], chosen["id"])
+            self.logger.info(
+                "Auto-selected demo page: %s (%s)", chosen["name"], chosen["id"]
+            )
         else:
             self.logger.info("Select fanpage to work on:")
             for idx, p in enumerate(pages, start=1):

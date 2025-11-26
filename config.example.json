@@ -13,7 +13,9 @@
     "graph_access_token": "${GRAPH_ACCESS_TOKEN}",
     "graph_version": "v24.0",
     "headless": false,
-    "_comment": "Thêm facebook_app_id và facebook_app_secret để tự động refresh token khi hết hạn (optional)",
+    "_comment_1": "=== TOKEN AUTO-REFRESH CONFIG (Optional) ===",
+    "_comment_2": "Thêm app_id và app_secret để tự động refresh token khi hết hạn",
     "facebook_app_id": "${FACEBOOK_APP_ID}",
-    "facebook_app_secret": "${FACEBOOK_APP_SECRET}"
+    "facebook_app_secret": "${FACEBOOK_APP_SECRET}",
+    "_comment_3": "Nếu không có app credentials, hệ thống sẽ yêu cầu nhập token thủ công qua browser"
 }

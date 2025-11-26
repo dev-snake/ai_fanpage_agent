@@ -17,6 +17,7 @@ from core.ai_engine import classify_comment
 from core.actions import ActionExecutor
 from core.report import Reporter
 from core.pages import PageSelector
+from core.token_manager import TokenManager
 from db.database import Database
 
 
@@ -53,21 +54,62 @@ def build_services(cfg: dict):
         logger,
         headless=cfg.get("headless", False),
     )
+
+    # Khởi tạo TokenManager
+    config_path = Path(cfg.get("config_path", "config.json"))
+    token_manager = TokenManager(config_path, logger, config_dict=cfg)
+
     db_path = cfg.get("database_path", "db/agent.db")
     db = Database(db_path)
     processed_ids = db.processed_comment_ids()
-    fetcher = CommentFetcher(cfg, logger, processed_ids=processed_ids)
-    executor = ActionExecutor(cfg, logger)
+
+    # Truyền token_manager vào các service
+    fetcher = CommentFetcher(
+        cfg, logger, processed_ids=processed_ids, token_manager=token_manager
+    )
+    executor = ActionExecutor(cfg, logger, token_manager=token_manager)
     reporter = Reporter(db)
     page_selector = PageSelector(
-        logger, config_path=Path(cfg.get("config_path", "config.json"))
+        logger, config_path=config_path, token_manager=token_manager
     )
-    return logger, login_mgr, fetcher, executor, reporter, db, page_selector
+
+    return (
+        logger,
+        login_mgr,
+        fetcher,
+        executor,
+        reporter,
+        db,
+        page_selector,
+        token_manager,
+    )
 
 
 def run_cycle(cfg: dict, services) -> None:
-    logger, _, fetcher, executor, reporter, _, _ = services
-    comments = fetcher.fetch_new(limit=cfg.get("max_actions_per_cycle", 20))
+    logger, _, fetcher, executor, reporter, _, _, token_manager = services
+
+    try:
+        comments = fetcher.fetch_new(limit=cfg.get("max_actions_per_cycle", 20))
+    except Exception as exc:
+        logger.error(
+            "❌ Lỗi khi fetch comments:\n"
+            "   Error: %s\n"
+            "   → Có thể token đã hết hạn, đang thử refresh...",
+            exc,
+        )
+        # Thử refresh token và retry
+        token = token_manager.get_valid_token(force_refresh=True)
+        if token:
+            logger.info("✅ Token đã được refresh, thử lại...")
+            try:
+                comments = fetcher.fetch_new(limit=cfg.get("max_actions_per_cycle", 20))
+            except Exception as retry_exc:
+                logger.error("❌ Vẫn lỗi sau khi refresh token: %s", retry_exc)
+                return
+        else:
+            logger.error("❌ Không thể refresh token. Bỏ qua cycle này.")
+            return
+
     if not comments:
         logger.info("No new comments.")
         return
@@ -84,14 +126,24 @@ def run_cycle(cfg: dict, services) -> None:
             [a.value for a in decision.actions],
         )
 
-        details = executor.execute(comment, decision)
-        for detail in details:
-            reporter.record(comment, decision, detail)
-            fetcher.mark_processed(comment.id)
-            actions_done += 1
-            if actions_done >= cfg.get("max_actions_per_cycle", 20):
-                logger.warning("Reached action cap for this cycle.")
-                return
+        try:
+            details = executor.execute(comment, decision)
+            for detail in details:
+                reporter.record(comment, decision, detail)
+                fetcher.mark_processed(comment.id)
+                actions_done += 1
+                if actions_done >= cfg.get("max_actions_per_cycle", 20):
+                    logger.warning("Reached action cap for this cycle.")
+                    return
+        except Exception as exc:
+            logger.error(
+                "❌ Lỗi khi execute action cho comment %s:\n"
+                "   Error: %s\n"
+                "   → Bỏ qua comment này và tiếp tục",
+                comment.id,
+                exc,
+            )
+            continue
 
 
 def main() -> None:
@@ -102,10 +154,19 @@ def main() -> None:
     interval = args.interval or cfg.get("interval_seconds", 90)
     cfg["config_path"] = args.config
 
-    logger, login_mgr, fetcher, executor, reporter, db, page_selector = build_services(
-        cfg
+    logger, login_mgr, fetcher, executor, reporter, db, page_selector, token_manager = (
+        build_services(cfg)
     )
-    services = (logger, login_mgr, fetcher, executor, reporter, db, page_selector)
+    services = (
+        logger,
+        login_mgr,
+        fetcher,
+        executor,
+        reporter,
+        db,
+        page_selector,
+        token_manager,
+    )
 
     if cfg.get("demo", False):
         logger.info("Demo mode: skip real login and page selection.")
@@ -118,8 +179,35 @@ def main() -> None:
             return
 
         try:
+            # Cập nhật browser context cho token_manager
+            token_manager.context = login_mgr.context
             fetcher.context = login_mgr.context
             executor.context = login_mgr.context
+
+            # Validate token trước khi bắt đầu
+            logger.info("🔐 Đang kiểm tra Facebook access token...")
+            token = token_manager.get_valid_token()
+            if token:
+                logger.info("✅ Token hợp lệ, sẵn sàng hoạt động")
+                # Hiển thị thông tin token
+                token_info = token_manager.get_token_info()
+                if token_info.get("expires_at"):
+                    logger.info("⏰ Token expires at: %s", token_info["expires_at"])
+                else:
+                    logger.info(
+                        "ℹ️  Token không có thời gian hết hạn (Page token hoặc long-lived)"
+                    )
+            else:
+                logger.error(
+                    "\n" + "=" * 60 + "\n"
+                    "❌ KHÔNG THỂ LẤY TOKEN HỢP LỆ\n"
+                    "=" * 60 + "\n"
+                    "Agent không thể khởi động vì thiếu Facebook access token.\n\n"
+                    "Vui lòng xem log ở trên để biết chi tiết lỗi.\n"
+                    "📖 Hướng dẫn: TOKEN_REFRESH_GUIDE.md\n" + "=" * 60
+                )
+                return
+
             working_page = page_selector.select_page(cfg, context=login_mgr.context)
             logger.info("Working fanpage: %s", working_page)
         except Exception as exc:

@@ -122,9 +122,16 @@ class AgentWorker(QThread):
             from main import build_services, load_config, run_cycle
 
             cfg = load_config("config.json")
-            logger, login_mgr, fetcher, executor, reporter, db, page_selector = (
-                build_services(cfg)
-            )
+            (
+                logger,
+                login_mgr,
+                fetcher,
+                executor,
+                reporter,
+                db,
+                page_selector,
+                token_manager,
+            ) = build_services(cfg)
             services = (
                 logger,
                 login_mgr,
@@ -133,6 +140,7 @@ class AgentWorker(QThread):
                 reporter,
                 db,
                 page_selector,
+                token_manager,
             )
 
             if not cfg.get("demo", False):
@@ -145,8 +153,27 @@ class AgentWorker(QThread):
                 self.log_signal.emit("✅ Login successful")
 
                 try:
+                    # Cập nhật browser context cho token_manager
+                    token_manager.context = login_mgr.context
                     fetcher.context = login_mgr.context
                     executor.context = login_mgr.context
+
+                    # Validate token trước khi bắt đầu
+                    self.log_signal.emit("🔐 Checking Facebook access token...")
+                    token = token_manager.get_valid_token()
+                    if token:
+                        self.log_signal.emit("✅ Token valid, ready to work")
+                        token_info = token_manager.get_token_info()
+                        if token_info.get("expires_at"):
+                            self.log_signal.emit(
+                                f"⏰ Token expires: {token_info['expires_at']}"
+                            )
+                    else:
+                        self.finished_signal.emit(
+                            False, "Cannot get valid token. Check configuration."
+                        )
+                        return
+
                     working_page = page_selector.select_page(
                         cfg, context=login_mgr.context
                     )
@@ -868,11 +895,17 @@ class ModernUI(QMainWindow):
             "total": {"vi": "Tổng", "en": "Total"},
             "intent_interest": {"vi": "Ý định: Quan tâm", "en": "Intent: Interested"},
             "intent_spam": {"vi": "Ý định: Spam", "en": "Intent: Spam"},
-            "intent_missing_phone": {"vi": "Ý định: Thiếu số", "en": "Intent: Missing phone"},
+            "intent_missing_phone": {
+                "vi": "Ý định: Thiếu số",
+                "en": "Intent: Missing phone",
+            },
             "intent_ask_price": {"vi": "Ý định: Hỏi giá", "en": "Intent: Ask price"},
             "action_reply": {"vi": "Hành động: Trả lời", "en": "Action: Reply"},
             "action_hide": {"vi": "Hành động: Ẩn", "en": "Action: Hide"},
-            "action_open_inbox": {"vi": "Hành động: Mở inbox", "en": "Action: Open inbox"},
+            "action_open_inbox": {
+                "vi": "Hành động: Mở inbox",
+                "en": "Action: Open inbox",
+            },
         }
         return mapping.get(key, {}).get(self.lang, key)
 
@@ -953,7 +986,11 @@ class ModernUI(QMainWindow):
                 row, 1, QTableWidgetItem(self._intent_label(item.get("intent")))
             )
             self.actions_table.setItem(
-                row, 2, QTableWidgetItem(", ".join(self._action_labels(item.get("actions", []))))
+                row,
+                2,
+                QTableWidgetItem(
+                    ", ".join(self._action_labels(item.get("actions", [])))
+                ),
             )
             self.actions_table.setItem(
                 row, 3, QTableWidgetItem(str(item.get("detail", "")))

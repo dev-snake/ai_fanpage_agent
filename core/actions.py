@@ -10,6 +10,7 @@ from .ai_engine import ActionType, Decision
 from .comments import Comment
 from .inbox import InboxService
 from .post import PostService
+from .token_manager import TokenManager
 
 
 class ActionExecutor:
@@ -18,6 +19,7 @@ class ActionExecutor:
         settings: dict,
         logger: logging.Logger,
         context: Optional[BrowserContext] = None,
+        token_manager: Optional[TokenManager] = None,
     ) -> None:
         self.settings = settings
         self.logger = logger.getChild("actions")
@@ -25,6 +27,7 @@ class ActionExecutor:
         self.post_service = PostService(logger=self.logger)
         self.context = context
         self.graph_version = settings.get("graph_version", "v17.0")
+        self.token_manager = token_manager
 
     def execute(self, comment: Comment, decision: Decision) -> List[str]:
         details: List[str] = []
@@ -40,7 +43,12 @@ class ActionExecutor:
 
     # ---------- Graph API helpers ----------
     def _graph_reply(self, comment: Comment, text: str) -> str:
-        token = self.settings.get("graph_access_token")
+        # Lấy token hợp lệ từ TokenManager
+        if self.token_manager:
+            token = self.token_manager.get_valid_token()
+        else:
+            token = self.settings.get("graph_access_token")
+
         if not token:
             return "missing graph_access_token"
         url = f"https://graph.facebook.com/{self.graph_version}/{comment.id}/comments"
@@ -60,7 +68,12 @@ class ActionExecutor:
         return f"graph reply failed: {resp.status_code} {resp.text}"
 
     def _graph_hide(self, comment: Comment) -> str:
-        token = self.settings.get("graph_access_token")
+        # Lấy token hợp lệ từ TokenManager
+        if self.token_manager:
+            token = self.token_manager.get_valid_token()
+        else:
+            token = self.settings.get("graph_access_token")
+
         if not token:
             return "missing graph_access_token"
         url = f"https://graph.facebook.com/{self.graph_version}/{comment.id}"

@@ -7,6 +7,8 @@ from typing import List, Optional, Set
 import requests
 from playwright.sync_api import BrowserContext
 
+from .token_manager import TokenManager
+
 
 @dataclass
 class Comment:
@@ -27,12 +29,14 @@ class CommentFetcher:
         logger,
         context: Optional[BrowserContext] = None,
         processed_ids: Optional[Set[str]] = None,
+        token_manager: Optional[TokenManager] = None,
     ) -> None:
         self.cfg = cfg
         self.demo = cfg.get("demo", True)
         self._seen: set[str] = set(processed_ids or set())
         self.logger = logger.getChild("comments")
         self.context = context
+        self.token_manager = token_manager
 
     def mark_processed(self, comment_id: str) -> None:
         self._seen.add(comment_id)
@@ -46,7 +50,12 @@ class CommentFetcher:
             return datetime.utcnow()
 
     def _fetch_graph_comments(self, limit: int) -> List[Comment]:
-        token = self.cfg.get("graph_access_token")
+        # Sử dụng TokenManager để lấy token hợp lệ (tự động refresh nếu cần)
+        if self.token_manager:
+            token = self.token_manager.get_valid_token()
+        else:
+            token = self.cfg.get("graph_access_token")
+
         page_id = self.cfg.get("page_id")
         if not token or not page_id:
             return []
@@ -139,7 +148,9 @@ class CommentFetcher:
             if not page_id:
                 return []
             page = self.context.new_page()
-            page.goto(f"https://www.facebook.com/{page_id}", wait_until="domcontentloaded")
+            page.goto(
+                f"https://www.facebook.com/{page_id}", wait_until="domcontentloaded"
+            )
             page.wait_for_timeout(1500)
             elements = page.query_selector_all("div[aria-label='Comment']")[:limit]
             for el in elements:
