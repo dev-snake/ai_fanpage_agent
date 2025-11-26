@@ -234,6 +234,62 @@ class ModernUI(QMainWindow):
     def __init__(self):
         super().__init__()
         self.worker: Optional[AgentWorker] = None
+        self.lang = "vi"
+        self.translations = {
+            "vi": {
+                "dashboard": "Tổng quan",
+                "metrics_total": "Tổng bình luận",
+                "metrics_interest": "Quan tâm",
+                "metrics_spam": "Spam",
+                "metrics_replied": "Đã trả lời",
+                "summary": "Tổng quan",
+                "recent": "Hoạt động gần đây",
+                "filters": "Bộ lọc",
+                "intent_filter": "Ý định",
+                "action_filter": "Hành động",
+                "lang_label": "Ngôn ngữ",
+                "all": "Tất cả",
+                "table_author": "Người dùng",
+                "table_intent": "Ý định",
+                "table_actions": "Hành động",
+                "table_detail": "Chi tiết",
+                "metric_value": "Giá trị",
+            },
+            "en": {
+                "dashboard": "Dashboard",
+                "metrics_total": "Total comments",
+                "metrics_interest": "Interested",
+                "metrics_spam": "Spam",
+                "metrics_replied": "AI replied",
+                "summary": "Summary",
+                "recent": "Recent activity",
+                "filters": "Filters",
+                "intent_filter": "Intent",
+                "action_filter": "Action",
+                "lang_label": "Language",
+                "all": "All",
+                "table_author": "User",
+                "table_intent": "Intent",
+                "table_actions": "Actions",
+                "table_detail": "Detail",
+                "metric_value": "Value",
+            },
+        }
+        self.intent_options = [
+            ("", {"vi": "Tất cả", "en": "All"}),
+            ("interest", {"vi": "Quan tâm", "en": "Interested"}),
+            ("spam", {"vi": "Spam", "en": "Spam"}),
+            ("missing_phone", {"vi": "Thiếu số", "en": "Missing phone"}),
+            ("ask_price", {"vi": "Hỏi giá", "en": "Ask price"}),
+        ]
+        self.action_options = [
+            ("", {"vi": "Tất cả", "en": "All"}),
+            ("reply", {"vi": "Trả lời", "en": "Reply"}),
+            ("hide", {"vi": "Ẩn", "en": "Hide"}),
+            ("open_inbox", {"vi": "Mở inbox", "en": "Open inbox"}),
+        ]
+        self.all_records: List[Dict] = []
+        self.all_summary: Dict[str, int] = {}
 
         self.setWindowTitle("AI Fanpage Agent")
         self.setMinimumSize(1400, 900)
@@ -247,6 +303,9 @@ class ModernUI(QMainWindow):
         self.refresh_timer.start(30000)  # Refresh every 30 seconds
 
         self.load_dashboard_data()
+
+    def _t(self, key: str) -> str:
+        return self.translations.get(self.lang, {}).get(key, key)
 
     def _init_ui(self):
         # Main container
@@ -297,20 +356,20 @@ class ModernUI(QMainWindow):
         # Navigation buttons
         self.nav_buttons = []
 
-        btn_dashboard = SidebarButton("Dashboard", "")
+        btn_dashboard = SidebarButton("Tổng quan", "")
         btn_dashboard.setChecked(True)
         btn_dashboard.clicked.connect(lambda: self._switch_page(0))
         self.nav_buttons.append(btn_dashboard)
 
-        btn_agent = SidebarButton("Agent Control", "")
+        btn_agent = SidebarButton("Điều khiển Agent", "")
         btn_agent.clicked.connect(lambda: self._switch_page(1))
         self.nav_buttons.append(btn_agent)
 
-        btn_settings = SidebarButton("Settings", "")
+        btn_settings = SidebarButton("Cài đặt", "")
         btn_settings.clicked.connect(lambda: self._switch_page(2))
         self.nav_buttons.append(btn_settings)
 
-        btn_history = SidebarButton("History", "")
+        btn_history = SidebarButton("Lịch sử", "")
         btn_history.clicked.connect(lambda: self._switch_page(3))
         self.nav_buttons.append(btn_history)
 
@@ -336,27 +395,50 @@ class ModernUI(QMainWindow):
 
         # Header
         header = QHBoxLayout()
-        title = QLabel("Dashboard")
-        title.setObjectName("pageTitle")
-        header.addWidget(title)
+        self.dashboard_title = QLabel(self._t("dashboard"))
+        self.dashboard_title.setObjectName("pageTitle")
+        header.addWidget(self.dashboard_title)
 
         header.addStretch()
 
-        self.refresh_btn = QPushButton("Refresh")
+        self.refresh_btn = QPushButton("Làm mới")
         self.refresh_btn.setObjectName("primaryButton")
         self.refresh_btn.clicked.connect(self.load_dashboard_data)
         header.addWidget(self.refresh_btn)
 
         layout.addLayout(header)
 
+        # Filters
+        filters_row = QHBoxLayout()
+        filters_row.setSpacing(10)
+
+        self.filters_label = QLabel(self._t("filters"))
+        self.filters_label.setObjectName("sectionTitle")
+        filters_row.addWidget(self.filters_label)
+
+        self.intent_filter = QComboBox()
+        for value, label_map in self.intent_options:
+            self.intent_filter.addItem(label_map.get(self.lang, value), value)
+        self.intent_filter.currentIndexChanged.connect(self._apply_filters)
+        filters_row.addWidget(self.intent_filter)
+
+        self.action_filter = QComboBox()
+        for value, label_map in self.action_options:
+            self.action_filter.addItem(label_map.get(self.lang, value), value)
+        self.action_filter.currentIndexChanged.connect(self._apply_filters)
+        filters_row.addWidget(self.action_filter)
+
+        filters_row.addStretch()
+        layout.addLayout(filters_row)
+
         # Metrics row
         metrics_layout = QHBoxLayout()
         metrics_layout.setSpacing(20)
 
-        self.metric_total = MetricCard("Total Comments", "0", "#42A5F5")
-        self.metric_interest = MetricCard("Interested", "0", "#00BFA5")
-        self.metric_spam = MetricCard("Spam Detected", "0", "#FFA500")
-        self.metric_replied = MetricCard("AI Replied", "0", "#FF6C37")
+        self.metric_total = MetricCard(self._t("metrics_total"), "0", "#42A5F5")
+        self.metric_interest = MetricCard(self._t("metrics_interest"), "0", "#00BFA5")
+        self.metric_spam = MetricCard(self._t("metrics_spam"), "0", "#FFA500")
+        self.metric_replied = MetricCard(self._t("metrics_replied"), "0", "#FF6C37")
 
         metrics_layout.addWidget(self.metric_total)
         metrics_layout.addWidget(self.metric_interest)
@@ -369,14 +451,16 @@ class ModernUI(QMainWindow):
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         # Summary panel
-        summary_panel = self._create_panel("Summary", self._create_summary_table())
-        splitter.addWidget(summary_panel)
+        self.summary_panel = self._create_panel(
+            self._t("summary"), self._create_summary_table()
+        )
+        splitter.addWidget(self.summary_panel)
 
         # Recent actions panel
-        actions_panel = self._create_panel(
-            "Recent Activity", self._create_actions_table()
+        self.actions_panel = self._create_panel(
+            self._t("recent"), self._create_actions_table()
         )
-        splitter.addWidget(actions_panel)
+        splitter.addWidget(self.actions_panel)
 
         splitter.setStretchFactor(0, 1)
         splitter.setStretchFactor(1, 2)
@@ -758,7 +842,12 @@ class ModernUI(QMainWindow):
         self.actions_table.setObjectName("dataTable")
         self.actions_table.setColumnCount(4)
         self.actions_table.setHorizontalHeaderLabels(
-            ["Author", "Intent", "Actions", "Detail"]
+            [
+                self._t("table_author"),
+                self._t("table_intent"),
+                self._t("table_actions"),
+                self._t("table_detail"),
+            ]
         )
 
         header = self.actions_table.horizontalHeader()
@@ -773,6 +862,102 @@ class ModernUI(QMainWindow):
             QAbstractItemView.SelectionBehavior.SelectRows
         )
         return self.actions_table
+
+    def _summary_label(self, key: str) -> str:
+        mapping = {
+            "total": {"vi": "Tổng", "en": "Total"},
+            "intent_interest": {"vi": "Ý định: Quan tâm", "en": "Intent: Interested"},
+            "intent_spam": {"vi": "Ý định: Spam", "en": "Intent: Spam"},
+            "intent_missing_phone": {"vi": "Ý định: Thiếu số", "en": "Intent: Missing phone"},
+            "intent_ask_price": {"vi": "Ý định: Hỏi giá", "en": "Intent: Ask price"},
+            "action_reply": {"vi": "Hành động: Trả lời", "en": "Action: Reply"},
+            "action_hide": {"vi": "Hành động: Ẩn", "en": "Action: Hide"},
+            "action_open_inbox": {"vi": "Hành động: Mở inbox", "en": "Action: Open inbox"},
+        }
+        return mapping.get(key, {}).get(self.lang, key)
+
+    def _intent_label(self, value: str | None) -> str:
+        for v, labels in self.intent_options:
+            if v == (value or ""):
+                return labels.get(self.lang, value or "")
+        return value or ""
+
+    def _action_labels(self, values: List[str]) -> List[str]:
+        display = []
+        for act in values:
+            for v, labels in self.action_options:
+                if v == act:
+                    display.append(labels.get(self.lang, act))
+                    break
+            else:
+                display.append(act)
+        return display
+
+    def _apply_filters(self):
+        intent_val = self.intent_filter.currentData() or ""
+        action_val = self.action_filter.currentData() or ""
+
+        records = self.all_records or []
+        filtered = []
+        for item in records:
+            if intent_val and item.get("intent") != intent_val:
+                continue
+            if action_val and action_val not in item.get("actions", []):
+                continue
+            filtered.append(item)
+
+        # Recompute summary on filtered set
+        if filtered:
+            from collections import Counter
+
+            intents = Counter(r.get("intent") for r in filtered if r.get("intent"))
+            action_types = Counter(
+                act for r in filtered for act in r.get("actions", []) if act
+            )
+            summary = {
+                "total": len(filtered),
+                **{f"intent_{k}": v for k, v in intents.items()},
+                **{f"action_{k}": v for k, v in action_types.items()},
+            }
+        else:
+            summary = {"total": 0}
+
+        # Update metrics
+        total = summary.get("total", len(filtered))
+        interest = summary.get("intent_interest", 0)
+        spam = summary.get("intent_spam", 0)
+        replied = summary.get("action_reply", 0)
+
+        self.metric_total.set_value(str(total))
+        self.metric_interest.set_value(str(interest))
+        self.metric_spam.set_value(str(spam))
+        self.metric_replied.set_value(str(replied))
+
+        # Update summary table
+        items = list(summary.items())
+        self.summary_table.setRowCount(len(items))
+        for row, (key, value) in enumerate(items):
+            self.summary_table.setItem(
+                row, 0, QTableWidgetItem(self._summary_label(key))
+            )
+            self.summary_table.setItem(row, 1, QTableWidgetItem(str(value)))
+
+        # Update recent actions (last 50)
+        display = filtered[-50:] if filtered else []
+        self.actions_table.setRowCount(len(display))
+        for row, item in enumerate(display):
+            self.actions_table.setItem(
+                row, 0, QTableWidgetItem(str(item.get("author", "")))
+            )
+            self.actions_table.setItem(
+                row, 1, QTableWidgetItem(self._intent_label(item.get("intent")))
+            )
+            self.actions_table.setItem(
+                row, 2, QTableWidgetItem(", ".join(self._action_labels(item.get("actions", []))))
+            )
+            self.actions_table.setItem(
+                row, 3, QTableWidgetItem(str(item.get("detail", "")))
+            )
 
     def load_dashboard_data(self):
         report = load_latest_report()
@@ -800,40 +985,9 @@ class ModernUI(QMainWindow):
         if not records:
             records = actions
 
-        # Update metrics
-        total = summary.get("total", len(records))
-        interest = summary.get("intent_interest", 0)
-        spam = summary.get("intent_spam", 0)
-        replied = summary.get("action_reply", 0)
-
-        self.metric_total.set_value(str(total))
-        self.metric_interest.set_value(str(interest))
-        self.metric_spam.set_value(str(spam))
-        self.metric_replied.set_value(str(replied))
-
-        # Update summary table
-        items = list(summary.items())
-        self.summary_table.setRowCount(len(items))
-        for row, (key, value) in enumerate(items):
-            self.summary_table.setItem(row, 0, QTableWidgetItem(str(key)))
-            self.summary_table.setItem(row, 1, QTableWidgetItem(str(value)))
-
-        # Update recent actions (last 50)
-        display = records[-50:] if records else []
-        self.actions_table.setRowCount(len(display))
-        for row, item in enumerate(display):
-            self.actions_table.setItem(
-                row, 0, QTableWidgetItem(str(item.get("author", "")))
-            )
-            self.actions_table.setItem(
-                row, 1, QTableWidgetItem(str(item.get("intent", "")))
-            )
-            self.actions_table.setItem(
-                row, 2, QTableWidgetItem(", ".join(item.get("actions", [])))
-            )
-            self.actions_table.setItem(
-                row, 3, QTableWidgetItem(str(item.get("detail", "")))
-            )
+        self.all_records = records or []
+        self.all_summary = summary or {}
+        self._apply_filters()
 
     def _load_history(self):
         actions = load_actions()
