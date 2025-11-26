@@ -1,20 +1,19 @@
 """
-Modern UI inspired by Postman - Clean, Professional Dark Theme
-Fixed: Consistent colors, proper contrast, dark-only theme
+Primary PyQt6 UI for AI Fanpage Agent.
+Dark, sidebar-first layout (main app window used by main.py).
 """
 
 from __future__ import annotations
 
 import json
-import subprocess
 import sys
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional
 
-from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer, QSize
-from PyQt6.QtGui import QFont, QIcon, QPalette, QColor, QAction
+from PyQt6.QtCore import Qt, QThread, pyqtSignal, QTimer
+from PyQt6.QtGui import QFont
 from PyQt6.QtWidgets import (
     QApplication,
     QFrame,
@@ -34,10 +33,6 @@ from PyQt6.QtWidgets import (
     QHeaderView,
     QAbstractItemView,
     QStackedWidget,
-    QToolButton,
-    QMenu,
-    QScrollArea,
-    QLineEdit,
     QComboBox,
     QCheckBox,
 )
@@ -204,19 +199,24 @@ class MetricCard(QFrame):
         super().__init__()
         self.color = color
         self.setObjectName("metricCard")
+        self.setMinimumHeight(100)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         layout = QVBoxLayout()
-        layout.setContentsMargins(20, 16, 20, 16)
-        layout.setSpacing(8)
+        layout.setContentsMargins(20, 18, 20, 18)
+        layout.setSpacing(10)
 
         self.value_label = QLabel(value)
         self.value_label.setObjectName("metricValue")
+        self.value_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
         self.title_label = QLabel(title)
         self.title_label.setObjectName("metricTitle")
+        self.title_label.setAlignment(Qt.AlignmentFlag.AlignLeft)
 
         layout.addWidget(self.value_label)
         layout.addWidget(self.title_label)
+        layout.addStretch()
 
         self.setLayout(layout)
 
@@ -301,13 +301,13 @@ class ModernUI(QMainWindow):
         btn_agent.clicked.connect(lambda: self._switch_page(1))
         self.nav_buttons.append(btn_agent)
 
-        btn_history = SidebarButton("History", "")
-        btn_history.clicked.connect(lambda: self._switch_page(3))
-        self.nav_buttons.append(btn_history)
-
         btn_settings = SidebarButton("Settings", "")
         btn_settings.clicked.connect(lambda: self._switch_page(2))
         self.nav_buttons.append(btn_settings)
+
+        btn_history = SidebarButton("History", "")
+        btn_history.clicked.connect(lambda: self._switch_page(3))
+        self.nav_buttons.append(btn_history)
 
         for btn in self.nav_buttons:
             layout.addWidget(btn)
@@ -317,10 +317,11 @@ class ModernUI(QMainWindow):
         sidebar.setLayout(layout)
         return sidebar
 
-    def _switch_page(self, index: int):
-        self.content_stack.setCurrentIndex(index)
-        for i, btn in enumerate(self.nav_buttons):
-            btn.setChecked(i == index)
+    def _switch_page(self, page_index: int):
+        self.content_stack.setCurrentIndex(page_index)
+        clicked = self.sender()
+        for btn in self.nav_buttons:
+            btn.setChecked(btn is clicked)
 
     def _create_dashboard_page(self) -> QWidget:
         page = QWidget()
@@ -396,47 +397,63 @@ class ModernUI(QMainWindow):
         control_frame.setObjectName("contentPanel")
         control_layout = QVBoxLayout()
         control_layout.setContentsMargins(30, 30, 30, 30)
-        control_layout.setSpacing(20)
+        control_layout.setSpacing(16)
 
-        # Status
-        status_layout = QHBoxLayout()
+        # Status section
+        status_section = QWidget()
+        status_layout = QVBoxLayout()
+        status_layout.setContentsMargins(0, 0, 0, 0)
+        status_layout.setSpacing(8)
+
+        status_row = QHBoxLayout()
         status_label = QLabel("Status:")
         status_label.setObjectName("labelBold")
+        status_label.setFixedWidth(80)
         self.agent_status = QLabel("Idle")
         self.agent_status.setObjectName("statusLabel")
-        status_layout.addWidget(status_label)
-        status_layout.addWidget(self.agent_status)
-        status_layout.addStretch()
-        control_layout.addLayout(status_layout)
+        status_row.addWidget(status_label)
+        status_row.addWidget(self.agent_status)
+        status_row.addStretch()
+        status_layout.addLayout(status_row)
 
         # Progress
         self.agent_progress = QProgressBar()
         self.agent_progress.setTextVisible(False)
-        self.agent_progress.setMinimumHeight(6)
-        control_layout.addWidget(self.agent_progress)
+        self.agent_progress.setFixedHeight(6)
+        status_layout.addWidget(self.agent_progress)
+
+        status_section.setLayout(status_layout)
+        control_layout.addWidget(status_section)
+
+        control_layout.addSpacing(8)
 
         # Cycle selection
-        cycle_layout = QHBoxLayout()
+        cycle_row = QHBoxLayout()
         cycle_label = QLabel("Run Mode:")
         cycle_label.setObjectName("labelBold")
+        cycle_label.setFixedWidth(80)
         self.cycle_combo = QComboBox()
         self.cycle_combo.addItems(["1 Cycle", "5 Cycles", "Continuous"])
-        cycle_layout.addWidget(cycle_label)
-        cycle_layout.addWidget(self.cycle_combo)
-        cycle_layout.addStretch()
-        control_layout.addLayout(cycle_layout)
+        self.cycle_combo.setMinimumHeight(40)
+        cycle_row.addWidget(cycle_label)
+        cycle_row.addWidget(self.cycle_combo, 1)
+        cycle_row.addStretch(2)
+        control_layout.addLayout(cycle_row)
+
+        control_layout.addSpacing(8)
 
         # Buttons
         btn_layout = QHBoxLayout()
+        btn_layout.setSpacing(16)
 
         self.start_btn = QPushButton("Start Agent")
         self.start_btn.setObjectName("successButton")
-        self.start_btn.setMinimumHeight(50)
+        self.start_btn.setMinimumHeight(48)
         self.start_btn.clicked.connect(self.start_agent)
 
         self.stop_btn = QPushButton("Stop Agent")
         self.stop_btn.setObjectName("dangerButton")
-        self.stop_btn.setMinimumHeight(50)
+        self.stop_btn.setMinimumHeight(48)
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.stop_agent)
 
@@ -445,9 +462,11 @@ class ModernUI(QMainWindow):
 
         control_layout.addLayout(btn_layout)
 
+        control_layout.addSpacing(12)
+
         # Log viewer
         log_label = QLabel("Agent Log:")
-        log_label.setObjectName("labelBold")
+        log_label.setObjectName("sectionTitle")
         control_layout.addWidget(log_label)
 
         self.agent_log = QTextEdit()
@@ -472,73 +491,181 @@ class ModernUI(QMainWindow):
         title.setObjectName("pageTitle")
         layout.addWidget(title)
 
-        # Settings panel
-        settings_frame = QFrame()
-        settings_frame.setObjectName("contentPanel")
-        settings_layout = QVBoxLayout()
-        settings_layout.setContentsMargins(30, 30, 30, 30)
-        settings_layout.setSpacing(20)
+        # Configuration Files Section
+        config_section = self._create_settings_section(
+            "Configuration Files", self._build_config_status_widget()
+        )
+        layout.addWidget(config_section)
 
-        # Config file status
-        config_label = QLabel("Configuration Files")
-        config_label.setObjectName("sectionTitle")
-        settings_layout.addWidget(config_label)
+        # Dashboard Settings Section
+        dashboard_section = self._create_settings_section(
+            "Dashboard Settings", self._build_dashboard_settings_widget()
+        )
+        layout.addWidget(dashboard_section)
 
-        config_status = QLabel()
-        config_status.setObjectName("statusInfo")
-        status_text = ""
+        # About Section
+        about_section = self._create_settings_section(
+            "About", self._build_about_widget()
+        )
+        layout.addWidget(about_section)
+
+        layout.addStretch()
+        page.setLayout(layout)
+        return page
+
+    def _create_settings_section(self, title: str, content_widget: QWidget) -> QFrame:
+        """Create a consistent settings section with proper spacing"""
+        section = QFrame()
+        section.setObjectName("contentPanel")
+
+        section_layout = QVBoxLayout()
+        section_layout.setContentsMargins(24, 20, 24, 20)
+        section_layout.setSpacing(16)
+
+        # Section title
+        title_label = QLabel(title)
+        title_label.setObjectName("sectionTitle")
+        section_layout.addWidget(title_label)
+
+        # Add separator line
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setObjectName("separator")
+        section_layout.addWidget(separator)
+
+        # Content
+        section_layout.addWidget(content_widget)
+
+        section.setLayout(section_layout)
+        return section
+
+    def _build_config_status_widget(self) -> QWidget:
+        """Build configuration status widget"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
 
         config_exists = Path("config.json").exists()
         cookies_exists = Path("cookies.json").exists()
         reports_exists = Path("reports").exists()
 
-        status_text += f"[{'OK' if config_exists else 'MISSING'}] config.json: "
-        status_text += f"<span style='color: {Colors.SUCCESS if config_exists else Colors.DANGER}'>{'Found' if config_exists else 'Missing'}</span><br>"
+        # Create status items
+        layout.addWidget(
+            self._create_status_item(
+                "config.json", config_exists, "Found" if config_exists else "Missing"
+            )
+        )
 
-        status_text += f"[{'OK' if cookies_exists else 'MISSING'}] cookies.json: "
-        status_text += f"<span style='color: {Colors.SUCCESS if cookies_exists else Colors.DANGER}'>{'Found' if cookies_exists else 'Missing'}</span><br>"
+        layout.addWidget(
+            self._create_status_item(
+                "cookies.json", cookies_exists, "Found" if cookies_exists else "Missing"
+            )
+        )
 
-        status_text += f"[{'OK' if reports_exists else 'INFO'}] reports/: "
-        status_text += f"<span style='color: {Colors.INFO}'>{'Found' if reports_exists else 'Will be created'}</span>"
+        layout.addWidget(
+            self._create_status_item(
+                "reports/",
+                reports_exists,
+                "Found" if reports_exists else "Will be created",
+                use_info_color=not reports_exists,
+            )
+        )
 
-        config_status.setText(status_text)
-        config_status.setTextFormat(Qt.TextFormat.RichText)
-        settings_layout.addWidget(config_status)
+        # Edit Configuration Button
+        edit_config_btn = QPushButton("Edit Configuration")
+        edit_config_btn.setObjectName("primaryButton")
+        edit_config_btn.setMinimumHeight(44)
+        edit_config_btn.clicked.connect(self._open_settings_editor)
+        layout.addWidget(edit_config_btn)
 
-        settings_layout.addSpacing(20)
+        widget.setLayout(layout)
+        return widget
 
-        # Dashboard Settings
-        refresh_label = QLabel("Dashboard Settings")
-        refresh_label.setObjectName("sectionTitle")
-        settings_layout.addWidget(refresh_label)
+    def _create_status_item(
+        self, label: str, is_ok: bool, status: str, use_info_color: bool = False
+    ) -> QWidget:
+        """Create a single status item with consistent styling"""
+        item = QWidget()
+        item_layout = QHBoxLayout()
+        item_layout.setContentsMargins(0, 0, 0, 0)
+        item_layout.setSpacing(12)
+
+        # Status badge
+        badge = QLabel("OK" if is_ok else "MISSING")
+        badge.setObjectName("statusBadgeOk" if is_ok else "statusBadgeMissing")
+        badge.setFixedSize(70, 24)
+        badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        item_layout.addWidget(badge)
+
+        # File name
+        name_label = QLabel(label)
+        name_label.setObjectName("statusItemName")
+        item_layout.addWidget(name_label)
+
+        # Status text
+        status_label = QLabel(status)
+        if use_info_color:
+            status_label.setStyleSheet(f"color: {Colors.INFO};")
+        elif is_ok:
+            status_label.setStyleSheet(f"color: {Colors.SUCCESS};")
+        else:
+            status_label.setStyleSheet(f"color: {Colors.DANGER};")
+        item_layout.addWidget(status_label)
+
+        item_layout.addStretch()
+        item.setLayout(item_layout)
+        return item
+
+    def _build_dashboard_settings_widget(self) -> QWidget:
+        """Build dashboard settings widget"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(12)
 
         auto_refresh = QCheckBox("Auto-refresh dashboard every 30 seconds")
         auto_refresh.setChecked(True)
         auto_refresh.toggled.connect(self._toggle_auto_refresh)
-        settings_layout.addWidget(auto_refresh)
+        layout.addWidget(auto_refresh)
 
-        # Info
-        settings_layout.addSpacing(20)
-        info_label = QLabel("About")
-        info_label.setObjectName("sectionTitle")
-        settings_layout.addWidget(info_label)
+        widget.setLayout(layout)
+        return widget
 
-        about_text = QLabel(
-            f"<b>AI Fanpage Agent</b><br>"
-            f"Version: 2.0 - Modern Dark UI<br>"
-            f"Theme: Dark Mode (Fixed)<br>"
-            f"UI Framework: PyQt6"
-        )
-        about_text.setTextFormat(Qt.TextFormat.RichText)
-        settings_layout.addWidget(about_text)
+    def _build_about_widget(self) -> QWidget:
+        """Build about info widget"""
+        widget = QWidget()
+        layout = QVBoxLayout()
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
 
-        settings_layout.addStretch()
+        info_items = [
+            ("Application", "AI Fanpage Agent"),
+            ("Version", "2.0 - Modern Dark UI"),
+            ("Theme", "Dark Mode (Fixed)"),
+            ("UI Framework", "PyQt6"),
+        ]
 
-        settings_frame.setLayout(settings_layout)
-        layout.addWidget(settings_frame)
+        for label, value in info_items:
+            item_layout = QHBoxLayout()
+            item_layout.setSpacing(12)
 
-        page.setLayout(layout)
-        return page
+            label_widget = QLabel(f"{label}:")
+            label_widget.setObjectName("aboutLabel")
+            item_layout.addWidget(label_widget)
+
+            value_widget = QLabel(value)
+            value_widget.setObjectName("aboutValue")
+            item_layout.addWidget(value_widget)
+
+            item_layout.addStretch()
+
+            item_container = QWidget()
+            item_container.setLayout(item_layout)
+            layout.addWidget(item_container)
+
+        widget.setLayout(layout)
+        return widget
 
     def _create_history_page(self) -> QWidget:
         page = QWidget()
@@ -768,6 +895,23 @@ class ModernUI(QMainWindow):
         else:
             self.refresh_timer.stop()
 
+    def _open_settings_editor(self):
+        """Open settings editor dialog"""
+        try:
+            from ui.settings_editor import show_settings_editor
+
+            if show_settings_editor(self):
+                QMessageBox.information(
+                    self,
+                    "Settings Saved",
+                    "Settings have been saved successfully!\n\n"
+                    "Please restart the application for changes to take effect.",
+                )
+        except Exception as e:
+            QMessageBox.critical(
+                self, "Error", f"Failed to open settings editor:\n{str(e)}"
+            )
+
     def _apply_dark_theme(self):
         """Apply consistent dark theme to entire application"""
         self.setStyleSheet(
@@ -836,6 +980,8 @@ class ModernUI(QMainWindow):
                 font-size: 32px;
                 font-weight: 700;
                 color: {Colors.ACCENT};
+                background: transparent;
+                padding: 0;
             }}
             
             QLabel#metricTitle {{
@@ -844,9 +990,15 @@ class ModernUI(QMainWindow):
                 text-transform: uppercase;
                 letter-spacing: 0.5px;
                 font-weight: 600;
+                background: transparent;
+                padding: 0;
             }}
             
             /* ==================== TYPOGRAPHY ==================== */
+            QLabel {{
+                background: transparent;
+            }}
+            
             QLabel#pageTitle {{
                 font-size: 28px;
                 font-weight: 700;
@@ -1108,6 +1260,52 @@ class ModernUI(QMainWindow):
             
             QSplitter::handle:hover {{
                 background-color: {Colors.ACCENT};
+            }}
+            
+            /* ==================== SETTINGS PAGE ==================== */
+            QFrame#separator {{
+                background-color: {Colors.BORDER};
+                max-height: 1px;
+                border: none;
+            }}
+            
+            QLabel#statusBadgeOk {{
+                background-color: {Colors.SUCCESS}30;
+                color: {Colors.SUCCESS};
+                border: 1px solid {Colors.SUCCESS};
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 2px 8px;
+            }}
+            
+            QLabel#statusBadgeMissing {{
+                background-color: {Colors.DANGER}30;
+                color: {Colors.DANGER};
+                border: 1px solid {Colors.DANGER};
+                border-radius: 4px;
+                font-size: 11px;
+                font-weight: 600;
+                padding: 2px 8px;
+            }}
+            
+            QLabel#statusItemName {{
+                color: {Colors.TEXT_PRIMARY};
+                font-size: 13px;
+                font-weight: 500;
+                min-width: 120px;
+            }}
+            
+            QLabel#aboutLabel {{
+                color: {Colors.TEXT_SECONDARY};
+                font-size: 13px;
+                font-weight: 500;
+                min-width: 120px;
+            }}
+            
+            QLabel#aboutValue {{
+                color: {Colors.TEXT_PRIMARY};
+                font-size: 13px;
             }}
         """
         )

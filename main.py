@@ -167,7 +167,7 @@ if __name__ == "__main__":
     else:
         # Otherwise show modern PyQt6 UI (Postman-style)
         try:
-            from ui.modern_ui import run as modern_ui_run
+            from ui.main_window import run as modern_ui_run
 
             modern_ui_run()
         except ImportError as e:

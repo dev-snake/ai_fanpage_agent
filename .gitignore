@@ -1,4 +1,54 @@
+# Environment variables
 .env
-venv/
+.env.local
+
+# Python
 __pycache__/
+*.py[cod]
+*$py.class
 *.pyc
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Application specific
+cookies.json
+data/actions.json
+reports/*.json
+logs/*.log
+
+# Sensitive
+*.key
+*.pem
+secrets/
