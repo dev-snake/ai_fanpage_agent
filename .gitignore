@@ -45,6 +45,8 @@ Thumbs.db
 # Application specific
 cookies.json
 data/actions.json
+db/*.db
+db/*.sqlite
 reports/*.json
 logs/*.log
 

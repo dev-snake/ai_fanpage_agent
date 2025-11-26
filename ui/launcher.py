@@ -5,6 +5,7 @@ Neutral, Windows-like layout with clearer hierarchy and no emojis.
 
 from __future__ import annotations
 
+import json
 import subprocess
 import sys
 import time
@@ -43,6 +44,7 @@ TEXT_MUTED = "#4b5563"
 BORDER = "#d9dde3"
 LOG_BG = "#0f172a"
 MONO_FONT = "Consolas"
+DEFAULT_DB_PATH = Path("db/agent.db")
 
 
 def button_style(bg: str, hover: str, text: str = "#ffffff") -> str:
@@ -75,6 +77,17 @@ def pill(text: str, tone: str = "accent") -> QLabel:
     label.setAlignment(Qt.AlignmentFlag.AlignCenter)
     label.setFont(QFont(BASE_FONT, 9, QFont.Weight.DemiBold))
     return label
+
+
+def resolve_db_path() -> Path:
+    cfg = Path("config.json")
+    if cfg.exists():
+        try:
+            data = json.loads(cfg.read_text(encoding="utf-8"))
+            return Path(data.get("database_path", DEFAULT_DB_PATH))
+        except Exception:
+            pass
+    return DEFAULT_DB_PATH
 
 
 class AgentWorker(QThread):
@@ -145,10 +158,12 @@ class AgentWorker(QThread):
                     break
                 time.sleep(interval)
 
-            report_path = reporter.flush_daily()
-            self.log_signal.emit(f"Da luu bao cao: {report_path}")
+            report = reporter.flush_daily()
+            total = report.get("summary", {}).get("total", 0) if report else 0
+            self.log_signal.emit(f"Da cap nhat bao cao SQLite (tong {total} ban ghi)")
 
             login_mgr.close()
+            db.close()
             label = "Da dung agent" if not self.is_running else "Hoan thanh"
             self.finished_signal.emit(True, f"{label}.")
 
@@ -384,7 +399,7 @@ class LauncherWindow(QMainWindow):
         super().__init__()
         self.config_exists = Path("config.json").exists()
         self.cookies_exists = Path("cookies.json").exists()
-        self.reports_dir = Path("reports")
+        self.db_path = resolve_db_path()
         self.init_ui()
 
     def init_ui(self) -> None:
@@ -471,13 +486,13 @@ class LauncherWindow(QMainWindow):
         layout.addLayout(self._status_row("cookies.json", self.cookies_exists))
         layout.addLayout(
             self._status_row(
-                "Thu muc reports/",
-                self.reports_dir.exists(),
-                extra="Tu dong tao khi co bao cao",
+                str(self.db_path),
+                self.db_path.exists(),
+                extra="Tao tu dong khi chay agent",
             )
         )
 
-        note = QLabel("Neu thieu file, bo sung truoc khi chay agent.")
+        note = QLabel("Neu thieu file cau hinh/DB, vui long bo sung truoc khi chay.")
         note.setObjectName("muted")
         note.setWordWrap(True)
         layout.addWidget(note)
@@ -516,7 +531,7 @@ class LauncherWindow(QMainWindow):
         tips = [
             "Cau hinh file config.json va cookies.json truoc khi chay.",
             "Neu chi demo, bat demo trong config de bo qua dang nhap.",
-            "Bao cao se duoc luu vao thu muc reports/ sau moi lan chay.",
+            "Bao cao + log thuc thi se luu trong db/agent.db (SQLite).",
             "De xem log khi agent dang hoat dong, mo cua so runner.",
         ]
         for tip in tips:

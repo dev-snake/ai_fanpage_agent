@@ -14,29 +14,32 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Tuple
 
+from db.database import Database
 
-REPORT_DIR = Path("reports")
-ACTION_LOG = Path("data/actions.json")
+
+DEFAULT_DB_PATH = Path("db/agent.db")
+
+
+def _db_path() -> Path:
+    cfg = Path("config.json")
+    if cfg.exists():
+        try:
+            data = json.loads(cfg.read_text(encoding="utf-8"))
+            return Path(data.get("database_path", DEFAULT_DB_PATH))
+        except Exception:
+            pass
+    return DEFAULT_DB_PATH
 
 
 # ---------- Data loaders ----------
 def load_latest_report() -> Dict:
-    reports = sorted(REPORT_DIR.glob("daily-*.json"))
-    if not reports:
-        return {}
-    latest = reports[-1]
-    data = json.loads(latest.read_text(encoding="utf-8"))
-    data["_path"] = str(latest)
-    return data
+    with Database(_db_path()) as db:
+        return db.daily_report()
 
 
-def load_actions() -> List[Dict]:
-    if not ACTION_LOG.exists():
-        return []
-    try:
-        return json.loads(ACTION_LOG.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return []
+def load_actions(limit: int | None = None) -> List[Dict]:
+    with Database(_db_path()) as db:
+        return db.actions(limit=limit)
 
 
 # ---------- Helpers ----------
@@ -197,7 +200,7 @@ def print_summary_report(report: Dict) -> None:
 
     print("\n  BAO CAO / LOG")
     print("  " + "─" * 64)
-    print(f"  File: {report.get('_path', 'N/A')}")
+    print(f"  Ngay: {report.get('date', 'N/A')} (nguon: SQLite)")
 
     summary = report.get("summary", {})
     if summary:
@@ -215,8 +218,9 @@ def main() -> None:
 
     report = load_latest_report()
     actions = load_actions()
-    records = report.get("records", []) if report else []
-    kpis = compute_kpis(report) if report else compute_kpis({"records": []})
+    records = report.get("records", []) if report else actions
+    kpis_source = report if report else {"records": actions}
+    kpis = compute_kpis(kpis_source)
 
     # Print all sections
     print_kpis(kpis)

@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 from typing import Dict, List
 
@@ -28,9 +29,20 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from db.database import Database
 
-REPORT_DIR = Path("reports")
-ACTION_LOG = Path("data/actions.json")
+DEFAULT_DB_PATH = Path("db/agent.db")
+
+
+def _db_path() -> Path:
+    cfg = Path("config.json")
+    if cfg.exists():
+        try:
+            data = json.loads(cfg.read_text(encoding="utf-8"))
+            return Path(data.get("database_path", DEFAULT_DB_PATH))
+        except Exception:
+            pass
+    return DEFAULT_DB_PATH
 
 BASE_FONT = "Segoe UI"
 WINDOW_BG = "#f5f6f8"
@@ -43,22 +55,13 @@ TEXT_MUTED = "#4b5563"
 
 
 def load_latest_report() -> Dict:
-    reports = sorted(REPORT_DIR.glob("daily-*.json"))
-    if not reports:
-        return {}
-    latest = reports[-1]
-    data = json.loads(latest.read_text(encoding="utf-8"))
-    data["_path"] = str(latest)
-    return data
+    with Database(_db_path()) as db:
+        return db.daily_report()
 
 
-def load_actions() -> List[Dict]:
-    if not ACTION_LOG.exists():
-        return []
-    try:
-        return json.loads(ACTION_LOG.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return []
+def load_actions(limit: int | None = None) -> List[Dict]:
+    with Database(_db_path()) as db:
+        return db.actions(limit=limit)
 
 
 class SummaryCard(QFrame):
@@ -255,13 +258,24 @@ class Dashboard(QMainWindow):
         report = load_latest_report()
         actions = load_actions()
         summary = report.get("summary", {}) if report else {}
-        records = report.get("records", []) if report else []
+        records = report.get("records", []) if report else actions
 
         if report:
-            path = report.get("_path", "")
-            self.report_label.setText(f"Bao cao: {path}")
+            date_str = report.get("date", "N/A")
+            self.report_label.setText(f"Bao cao ngay: {date_str}")
         else:
             self.report_label.setText("Chua co bao cao duoc ghi nhan.")
+
+        if actions and not summary:
+            intents = Counter(a.get("intent") for a in actions if a.get("intent"))
+            action_types = Counter(act for a in actions for act in a.get("actions", []))
+            summary = {
+                "total": len(actions),
+                **{f"intent_{k}": v for k, v in intents.items()},
+                **{f"action_{k}": v for k, v in action_types.items()},
+            }
+        if not records:
+            records = actions
 
         self._update_cards(summary, records)
         self._populate_summary(summary)

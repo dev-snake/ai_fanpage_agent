@@ -53,15 +53,12 @@ def build_services(cfg: dict):
         logger,
         headless=cfg.get("headless", False),
     )
-    db = Database("data/actions.json")
-    processed_ids = {
-        r.get("comment_id")
-        for r in db.all()
-        if isinstance(r, dict) and r.get("comment_id")
-    }
+    db_path = cfg.get("database_path", "db/agent.db")
+    db = Database(db_path)
+    processed_ids = db.processed_comment_ids()
     fetcher = CommentFetcher(cfg, logger, processed_ids=processed_ids)
     executor = ActionExecutor(cfg, logger)
-    reporter = Reporter(cfg.get("report_dir", "reports"))
+    reporter = Reporter(db)
     page_selector = PageSelector(
         logger, config_path=Path(cfg.get("config_path", "config.json"))
     )
@@ -69,7 +66,7 @@ def build_services(cfg: dict):
 
 
 def run_cycle(cfg: dict, services) -> None:
-    logger, _, fetcher, executor, reporter, db, _ = services
+    logger, _, fetcher, executor, reporter, _, _ = services
     comments = fetcher.fetch_new(limit=cfg.get("max_actions_per_cycle", 20))
     if not comments:
         logger.info("No new comments.")
@@ -89,17 +86,7 @@ def run_cycle(cfg: dict, services) -> None:
 
         details = executor.execute(comment, decision)
         for detail in details:
-            reporter.record(comment.id, decision, detail)
-            db.append(
-                {
-                    "comment_id": comment.id,
-                    "author": comment.author,
-                    "avatar_url": comment.avatar_url,
-                    "intent": decision.intent.value,
-                    "actions": [a.value for a in decision.actions],
-                    "detail": detail,
-                }
-            )
+            reporter.record(comment, decision, detail)
             fetcher.mark_processed(comment.id)
             actions_done += 1
             if actions_done >= cfg.get("max_actions_per_cycle", 20):
@@ -151,12 +138,14 @@ def main() -> None:
 
     try:
         run_loop(task, interval_seconds=interval, cycles=args.cycles)
-        report_path = reporter.flush_daily()
-        logger.info("Saved report to %s", report_path)
+        report = reporter.flush_daily()
+        total = report.get("summary", {}).get("total", 0) if report else 0
+        logger.info("Saved daily summary to SQLite (%d records).", total)
     except KeyboardInterrupt:
         logger.warning("Interrupted by user.")
     finally:
         login_mgr.close()
+        db.close()
 
 
 if __name__ == "__main__":

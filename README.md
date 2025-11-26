@@ -30,7 +30,7 @@ ui/
 
 -   Auto classify & reply binh luan: rule-based + co san hook LLM (OpenAI).
 -   Auto hide spam/chui, mo inbox khi thieu SĐT.
--   Auto post (stub) va bao cao cuoi ngay (JSON).
+-   Auto post (stub) va bao cao cuoi ngay (luu SQLite).
 -   Scheduler vong lap chu ky, dem mo (khong can Facebook that).
 
 ## Cau hinh
@@ -79,7 +79,7 @@ python -m playwright install chromium  # cai browser cho Playwright
 python main.py --demo --cycles 1 --interval 30
 ```
 
--   Bao cao se luu tai `reports/daily-YYYY-MM-DD.json`, log hanh dong tai `data/actions.json`.
+-   Bao cao + log hanh dong duoc luu thuc te trong SQLite `db/agent.db` (Layer 1).
 
 ## Thu tu bat buoc truoc vong loop
 
@@ -91,7 +91,7 @@ python main.py --demo --cycles 1 --interval 30
 
 -   Streamlit (web) khong cai san trong requirements de tranh loi pyarrow tren Python 3.14. Neu muon dung, khuyen nghi Python 3.10-3.12 va tu cai: `pip install streamlit==1.38.*` roi chay `streamlit run ui/dashboard.py`.
 -   Agent: `python main.py --cycles 0`
--   Dashboard Streamlit doc `reports/daily-*.json` va `data/actions.json`.
+-   Dashboard Streamlit doc truc tiep tu SQLite (`db/agent.db`).
 
 ## UI PyQt6 (desktop)
 

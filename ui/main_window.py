@@ -37,6 +37,8 @@ from PyQt6.QtWidgets import (
     QCheckBox,
 )
 
+from db.database import Database
+
 
 # ==================== DARK THEME COLORS ====================
 class Colors:
@@ -79,27 +81,28 @@ class Colors:
 
 
 # ==================== DATA LOADERS ====================
-REPORT_DIR = Path("reports")
-ACTION_LOG = Path("data/actions.json")
+DEFAULT_DB_PATH = Path("db/agent.db")
+
+
+def _db_path() -> Path:
+    cfg = Path("config.json")
+    if cfg.exists():
+        try:
+            data = json.loads(cfg.read_text(encoding="utf-8"))
+            return Path(data.get("database_path", DEFAULT_DB_PATH))
+        except Exception:
+            pass
+    return DEFAULT_DB_PATH
 
 
 def load_latest_report() -> Dict:
-    reports = sorted(REPORT_DIR.glob("daily-*.json"))
-    if not reports:
-        return {}
-    latest = reports[-1]
-    data = json.loads(latest.read_text(encoding="utf-8"))
-    data["_path"] = str(latest)
-    return data
+    with Database(_db_path()) as db:
+        return db.daily_report()
 
 
-def load_actions() -> List[Dict]:
-    if not ACTION_LOG.exists():
-        return []
-    try:
-        return json.loads(ACTION_LOG.read_text(encoding="utf-8"))
-    except json.JSONDecodeError:
-        return []
+def load_actions(day: str | None = None, limit: int | None = None) -> List[Dict]:
+    with Database(_db_path()) as db:
+        return db.actions(day=day, limit=limit)
 
 
 # ==================== WORKER THREAD ====================
@@ -169,10 +172,12 @@ class AgentWorker(QThread):
                 self.log_signal.emit(f"⏳ Waiting {interval}s before next cycle...")
                 time.sleep(interval)
 
-            report_path = reporter.flush_daily()
-            self.log_signal.emit(f"💾 Report saved: {report_path}")
+            report = reporter.flush_daily()
+            total = report.get("summary", {}).get("total", 0) if report else 0
+            self.log_signal.emit(f"💾 Updated SQLite summary ({total} records)")
 
             login_mgr.close()
+            db.close()
             self.finished_signal.emit(True, "Agent completed successfully")
 
         except Exception as exc:
@@ -548,7 +553,8 @@ class ModernUI(QMainWindow):
 
         config_exists = Path("config.json").exists()
         cookies_exists = Path("cookies.json").exists()
-        reports_exists = Path("reports").exists()
+        db_path = _db_path()
+        db_exists = db_path.exists()
 
         # Create status items
         layout.addWidget(
@@ -565,10 +571,10 @@ class ModernUI(QMainWindow):
 
         layout.addWidget(
             self._create_status_item(
-                "reports/",
-                reports_exists,
-                "Found" if reports_exists else "Will be created",
-                use_info_color=not reports_exists,
+                str(db_path),
+                db_exists,
+                "Ready" if db_exists else "Will be created automatically",
+                use_info_color=not db_exists,
             )
         )
 
@@ -770,9 +776,29 @@ class ModernUI(QMainWindow):
 
     def load_dashboard_data(self):
         report = load_latest_report()
-        actions = load_actions()
-        summary = report.get("summary", {}) if report else {}
-        records = report.get("records", []) if report else []
+        report_day = report.get("date") if report else None
+        actions = load_actions(day=report_day)
+
+        if report:
+            summary = report.get("summary", {})
+            records = report.get("records", [])
+        else:
+            summary = {}
+            records = []
+
+        # Use live SQLite actions when available
+        if actions and not summary:
+            from collections import Counter
+
+            intents = Counter(a.get("intent") for a in actions if a.get("intent"))
+            action_types = Counter(act for a in actions for act in a.get("actions", []))
+            summary = {
+                "total": len(actions),
+                **{f"intent_{k}": v for k, v in intents.items()},
+                **{f"action_{k}": v for k, v in action_types.items()},
+            }
+        if not records:
+            records = actions
 
         # Update metrics
         total = summary.get("total", len(records))
@@ -793,7 +819,7 @@ class ModernUI(QMainWindow):
             self.summary_table.setItem(row, 1, QTableWidgetItem(str(value)))
 
         # Update recent actions (last 50)
-        display = (actions or records)[-50:]
+        display = records[-50:] if records else []
         self.actions_table.setRowCount(len(display))
         for row, item in enumerate(display):
             self.actions_table.setItem(

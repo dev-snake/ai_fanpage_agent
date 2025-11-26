@@ -7,7 +7,7 @@
     "llm_provider": "openai",
     "openai_api_key": "${OPENAI_API_KEY}",
     "openai_model": "gpt-4o-mini",
-    "report_dir": "reports",
+    "database_path": "db/agent.db",
     "timezone": "Asia/Ho_Chi_Minh",
     "log_level": "INFO",
     "graph_access_token": "${GRAPH_ACCESS_TOKEN}",

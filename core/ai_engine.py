@@ -81,9 +81,7 @@ def generate_reply(intent: Intent, comment: Comment) -> Optional[str]:
             "Bạn để lại SĐT/inbox để mình hỗ trợ chọn mẫu và báo giá chi tiết."
         )
     if intent == Intent.MISSING_PHONE:
-        return (
-            "Mình đã mở inbox cho bạn, vui lòng check tin nhắn để được hỗ trợ nhanh."
-        )
+        return "Mình đã mở inbox cho bạn, vui lòng check tin nhắn để được hỗ trợ nhanh."
     if intent == Intent.SPAM:
         return None
     if intent == Intent.ABUSE:
@@ -93,7 +91,9 @@ def generate_reply(intent: Intent, comment: Comment) -> Optional[str]:
     )
 
 
-def llm_classify(message: str, settings: dict, logger: logging.Logger) -> Optional[Tuple[Intent, float, str]]:
+def llm_classify(
+    message: str, settings: dict, logger: logging.Logger
+) -> Optional[Tuple[Intent, float, str]]:
     if settings.get("llm_provider") != "openai":
         return None
     try:
@@ -116,9 +116,9 @@ def llm_classify(message: str, settings: dict, logger: logging.Logger) -> Option
         return None
 
     prompt = (
-        "B?n l� b? ph�n lo?i intent cho b�nh lu?n Facebook b�n h�ng. "
-        "Intent h?p l?: ask_price, interest, spam, abuse, missing_phone. "
-        "Tr? JSON: {intent, confidence, reason}."
+        "Bạn là bộ phận phân loại intent cho bình luận Facebook bán hàng. "
+        "Intent hợp lệ: ask_price, interest, spam, abuse, missing_phone. "
+        "Trả về JSON: {intent, confidence, reason}."
     )
     try:
         res = client.chat.completions.create(
@@ -137,14 +137,18 @@ def llm_classify(message: str, settings: dict, logger: logging.Logger) -> Option
         confidence = float(match_conf.group(1)) if match_conf else 0.55
         return intent, confidence, "llm"
     except AuthenticationError as exc:  # pragma: no cover
-        logger.error("LLM classify failed: authentication error, check OPENAI_API_KEY. %s", exc)
+        logger.error(
+            "LLM classify failed: authentication error, check OPENAI_API_KEY. %s", exc
+        )
         return None
     except Exception as exc:  # pragma: no cover
         logger.error("LLM classify failed: %s", exc)
         return None
 
 
-def classify_comment(comment: Comment, settings: dict, logger: logging.Logger) -> Decision:
+def classify_comment(
+    comment: Comment, settings: dict, logger: logging.Logger
+) -> Decision:
     llm_result = llm_classify(comment.message, settings, logger)
     if llm_result:
         intent, confidence, rationale = llm_result

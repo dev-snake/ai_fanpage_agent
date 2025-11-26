@@ -44,8 +44,18 @@ class ActionExecutor:
         if not token:
             return "missing graph_access_token"
         url = f"https://graph.facebook.com/{self.graph_version}/{comment.id}/comments"
-        resp = requests.post(url, params={"access_token": token, "message": text})
+        # Add is_hidden=false to ensure reply is publicly visible
+        resp = requests.post(
+            url,
+            params={
+                "access_token": token,
+                "message": text,
+                "is_hidden": "false",  # Force public visibility
+            },
+        )
         if resp.ok:
+            reply_id = resp.json().get("id")
+            self.logger.info("Reply posted with ID: %s", reply_id)
             return "graph reply ok"
         return f"graph reply failed: {resp.status_code} {resp.text}"
 
@@ -82,7 +92,9 @@ class ActionExecutor:
             page = self.context.new_page()
             page.goto(comment.permalink, wait_until="domcontentloaded")
             page.wait_for_timeout(1200)
-            menu = page.query_selector("div[aria-label='More actions'], div[aria-label='Actions for this comment']")
+            menu = page.query_selector(
+                "div[aria-label='More actions'], div[aria-label='Actions for this comment']"
+            )
             if menu:
                 menu.click()
                 hide_btn = page.query_selector("text=Hide comment")
@@ -121,7 +133,9 @@ class ActionExecutor:
         return result
 
     def inbox_message(self, comment: Comment, text: str) -> str:
-        return self.inbox.send_message(comment.author, text, demo=self.settings.get("demo", True))
+        return self.inbox.send_message(
+            comment.author, text, demo=self.settings.get("demo", True)
+        )
 
     def create_post(self, caption: str) -> str:
         return self.post_service.create(caption, demo=self.settings.get("demo", True))
