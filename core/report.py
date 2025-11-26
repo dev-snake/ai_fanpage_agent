@@ -14,7 +14,9 @@ class Reporter:
     def __init__(self, db: Database) -> None:
         self.db = db
 
-    def record(self, comment: Comment, decision: Decision, detail: str) -> None:
+    def record(
+        self, comment: Comment, decision: Decision, detail: str, reply_text: str = ""
+    ) -> None:
         """Write a single action row into the realtime data layer."""
         self.db.record_action(
             comment_id=comment.id,
@@ -25,6 +27,7 @@ class Reporter:
             intent=decision.intent.value,
             actions=[a.value for a in decision.actions],
             detail=detail,
+            reply_text=reply_text,
             timestamp=comment.created_at or datetime.utcnow(),
         )
 

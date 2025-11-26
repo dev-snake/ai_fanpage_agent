@@ -10,7 +10,7 @@
     "database_path": "db/agent.db",
     "timezone": "Asia/Ho_Chi_Minh",
     "log_level": "INFO",
-    "graph_access_token": "${GRAPH_ACCESS_TOKEN}",
+    "graph_access_token": "EAAY6EPwzr3YBQIhghOVvAZCF6ISvWj3fEc4Cydec7yeCYek4NsmqPvnDvxKE9AhgXDjAPkD2fB1Y4RpnGKq8WOfjaV6p5ZCFj25VZBkeKJPCuQB4YwpmZBza4pCeB0mgZCb5CVync0xYAf0nvySPIdZClKYJNLPnYA2cM96uopKQDbB5hCfKutnljB6AeqhspQbedXAhJy2KSSNn2SwLhq796079gtPPLY0Me60XSvspsZD",
     "graph_version": "v24.0",
     "headless": false,
     "_comment": "Thêm facebook_app_id và facebook_app_secret để tự động refresh token khi hết hạn (optional)",

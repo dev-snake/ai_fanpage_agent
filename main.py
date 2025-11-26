@@ -17,7 +17,6 @@ from core.ai_engine import classify_comment
 from core.actions import ActionExecutor
 from core.report import Reporter
 from core.pages import PageSelector
-from core.token_manager import TokenManager
 from db.database import Database
 
 
@@ -55,23 +54,17 @@ def build_services(cfg: dict):
         headless=cfg.get("headless", False),
     )
 
-    # Khởi tạo TokenManager
     config_path = Path(cfg.get("config_path", "config.json"))
-    token_manager = TokenManager(config_path, logger, config_dict=cfg)
 
     db_path = cfg.get("database_path", "db/agent.db")
     db = Database(db_path)
     processed_ids = db.processed_comment_ids()
 
-    # Truyền token_manager vào các service
-    fetcher = CommentFetcher(
-        cfg, logger, processed_ids=processed_ids, token_manager=token_manager
-    )
-    executor = ActionExecutor(cfg, logger, token_manager=token_manager)
+    # Không dùng TokenManager nữa - đọc token trực tiếp từ config
+    fetcher = CommentFetcher(cfg, logger, processed_ids=processed_ids)
+    executor = ActionExecutor(cfg, logger)
     reporter = Reporter(db)
-    page_selector = PageSelector(
-        logger, config_path=config_path, token_manager=token_manager
-    )
+    page_selector = PageSelector(logger, config_path=config_path)
 
     return (
         logger,
@@ -81,12 +74,11 @@ def build_services(cfg: dict):
         reporter,
         db,
         page_selector,
-        token_manager,
     )
 
 
 def run_cycle(cfg: dict, services) -> None:
-    logger, _, fetcher, executor, reporter, _, _, token_manager = services
+    logger, _, fetcher, executor, reporter, _, _ = services
 
     try:
         comments = fetcher.fetch_new(limit=cfg.get("max_actions_per_cycle", 20))
@@ -94,21 +86,10 @@ def run_cycle(cfg: dict, services) -> None:
         logger.error(
             "❌ Lỗi khi fetch comments:\n"
             "   Error: %s\n"
-            "   → Có thể token đã hết hạn, đang thử refresh...",
+            "   → Token có thể hết hạn. Vui lòng cập nhật token mới trong config.",
             exc,
         )
-        # Thử refresh token và retry
-        token = token_manager.get_valid_token(force_refresh=True)
-        if token:
-            logger.info("✅ Token đã được refresh, thử lại...")
-            try:
-                comments = fetcher.fetch_new(limit=cfg.get("max_actions_per_cycle", 20))
-            except Exception as retry_exc:
-                logger.error("❌ Vẫn lỗi sau khi refresh token: %s", retry_exc)
-                return
-        else:
-            logger.error("❌ Không thể refresh token. Bỏ qua cycle này.")
-            return
+        return
 
     if not comments:
         logger.info("No new comments.")
@@ -117,19 +98,37 @@ def run_cycle(cfg: dict, services) -> None:
     logger.info("Found %d comment(s).", len(comments))
     actions_done = 0
     for comment in comments:
+        # Hiển thị thông tin chi tiết về comment
+        logger.info(
+            "\n" + "=" * 60 + "\n"
+            "👤 Người dùng: %s\n"
+            "🖼️  Avatar: %s\n"
+            "💬 Nội dung: %s\n"
+            "🕐 Thời gian: %s\n"
+            "🔗 Link: %s\n" + "=" * 60,
+            comment.author,
+            comment.avatar_url or "(không có avatar)",
+            (
+                comment.message[:100] + "..."
+                if len(comment.message) > 100
+                else comment.message
+            ),
+            comment.created_at.strftime("%Y-%m-%d %H:%M:%S"),
+            comment.permalink or "(không có link)",
+        )
+
         decision = classify_comment(comment, cfg, logger)
         logger.info(
-            "%s -> %s (%.2f) | actions %s",
-            comment.message,
+            "🤖 AI phân tích: %s (confidence: %.2f) | hành động: %s",
             decision.intent.value,
             decision.confidence,
             [a.value for a in decision.actions],
         )
 
         try:
-            details = executor.execute(comment, decision)
-            for detail in details:
-                reporter.record(comment, decision, detail)
+            results = executor.execute(comment, decision)
+            for status, reply_text in results:
+                reporter.record(comment, decision, status, reply_text)
                 fetcher.mark_processed(comment.id)
                 actions_done += 1
                 if actions_done >= cfg.get("max_actions_per_cycle", 20):
@@ -145,6 +144,15 @@ def run_cycle(cfg: dict, services) -> None:
             )
             continue
 
+    # Clear seen cache định kỳ để tránh memory leak (sau mỗi 10 cycles)
+    if not hasattr(fetcher, "_cycle_count"):
+        fetcher._cycle_count = 0
+    fetcher._cycle_count += 1
+    if fetcher._cycle_count >= 10:
+        fetcher.clear_seen_cache()
+        fetcher._cycle_count = 0
+        logger.debug("🧹 Cleared seen cache after 10 cycles")
+
 
 def main() -> None:
     args = parse_args()
@@ -154,8 +162,8 @@ def main() -> None:
     interval = args.interval or cfg.get("interval_seconds", 90)
     cfg["config_path"] = args.config
 
-    logger, login_mgr, fetcher, executor, reporter, db, page_selector, token_manager = (
-        build_services(cfg)
+    logger, login_mgr, fetcher, executor, reporter, db, page_selector = build_services(
+        cfg
     )
     services = (
         logger,
@@ -165,7 +173,6 @@ def main() -> None:
         reporter,
         db,
         page_selector,
-        token_manager,
     )
 
     if cfg.get("demo", False):
@@ -179,34 +186,26 @@ def main() -> None:
             return
 
         try:
-            # Cập nhật browser context cho token_manager
-            token_manager.context = login_mgr.context
+            # Cập nhật browser context
             fetcher.context = login_mgr.context
             executor.context = login_mgr.context
 
-            # Validate token trước khi bắt đầu
-            logger.info("🔐 Đang kiểm tra Facebook access token...")
-            token = token_manager.get_valid_token()
-            if token:
-                logger.info("✅ Token hợp lệ, sẵn sàng hoạt động")
-                # Hiển thị thông tin token
-                token_info = token_manager.get_token_info()
-                if token_info.get("expires_at"):
-                    logger.info("⏰ Token expires at: %s", token_info["expires_at"])
-                else:
-                    logger.info(
-                        "ℹ️  Token không có thời gian hết hạn (Page token hoặc long-lived)"
-                    )
-            else:
+            # Kiểm tra token có trong config không
+            if not cfg.get("graph_access_token") or "{" in cfg.get(
+                "graph_access_token", ""
+            ):
                 logger.error(
                     "\n" + "=" * 60 + "\n"
-                    "❌ KHÔNG THỂ LẤY TOKEN HỢP LỆ\n"
+                    "❌ THIẾU FACEBOOK ACCESS TOKEN\n"
                     "=" * 60 + "\n"
-                    "Agent không thể khởi động vì thiếu Facebook access token.\n\n"
-                    "Vui lòng xem log ở trên để biết chi tiết lỗi.\n"
-                    "📖 Hướng dẫn: TOKEN_REFRESH_GUIDE.md\n" + "=" * 60
+                    "Vui lòng cập nhật GRAPH_ACCESS_TOKEN trong file .env\n"
+                    "Hoặc trong config.json\n\n"
+                    "Lấy token tại: https://developers.facebook.com/tools/explorer/\n"
+                    "📝 Lưu ý: Token 60 ngày không cần refresh tự động\n" + "=" * 60
                 )
                 return
+            else:
+                logger.info("✅ Token đã được cấu hình (long-lived 60 days)")
 
             working_page = page_selector.select_page(cfg, context=login_mgr.context)
             logger.info("Working fanpage: %s", working_page)

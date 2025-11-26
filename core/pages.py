@@ -8,8 +8,6 @@ from typing import Dict, List, Optional
 import requests
 from playwright.sync_api import BrowserContext
 
-from .token_manager import TokenManager
-
 
 class PageSelector:
     def __init__(

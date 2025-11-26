@@ -1,13 +1,13 @@
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 from datetime import datetime
+from threading import Lock
 from typing import List, Optional, Set
 
 import requests
 from playwright.sync_api import BrowserContext
-
-from .token_manager import TokenManager
 
 
 @dataclass
@@ -29,17 +29,75 @@ class CommentFetcher:
         logger,
         context: Optional[BrowserContext] = None,
         processed_ids: Optional[Set[str]] = None,
-        token_manager: Optional[TokenManager] = None,
     ) -> None:
         self.cfg = cfg
-        self.demo = cfg.get("demo", True)
+        self.demo = cfg.get("demo", False)  # Mặc định là False - dùng data thật
         self._seen: set[str] = set(processed_ids or set())
+        self._seen_lock = Lock()  # Thread-safe cho _seen set
         self.logger = logger.getChild("comments")
         self.context = context
-        self.token_manager = token_manager
 
     def mark_processed(self, comment_id: str) -> None:
-        self._seen.add(comment_id)
+        with self._seen_lock:
+            self._seen.add(comment_id)
+
+    def clear_seen_cache(self) -> None:
+        """Clear _seen cache để tránh memory leak trong long-running process"""
+        with self._seen_lock:
+            self._seen.clear()
+            self.logger.debug("Cleared seen cache")
+
+    def get_user_comment_history(self, user_id: str, limit: int = 5) -> List[Comment]:
+        """Lấy lịch sử comment của user trên page (để hiểu context)"""
+        token = self.cfg.get("graph_access_token")
+
+        page_id = self.cfg.get("page_id")
+        version = self.cfg.get("graph_version", "v17.0")
+
+        if not token or not page_id:
+            return []
+
+        try:
+            # Tìm tất cả comments của user trên page
+            url = f"https://graph.facebook.com/{version}/{page_id}/feed"
+            resp = requests.get(
+                url,
+                params={
+                    "access_token": token,
+                    "fields": "comments{from,message,created_time}",
+                    "limit": 20,
+                },
+                timeout=10,
+            )
+            if not resp.ok:
+                return []
+
+            user_comments = []
+            posts = resp.json().get("data", [])
+            for post in posts:
+                comments_data = post.get("comments", {}).get("data", [])
+                for c in comments_data:
+                    from_info = c.get("from", {})
+                    if from_info.get("id") == user_id:
+                        user_comments.append(
+                            Comment(
+                                id=c.get("id", ""),
+                                post_id=post.get("id", ""),
+                                author=from_info.get("name", "Unknown"),
+                                avatar_url=None,
+                                message=c.get("message", ""),
+                                created_at=self._parse_fb_time(
+                                    c.get("created_time", "")
+                                ),
+                                raw=c,
+                            )
+                        )
+                        if len(user_comments) >= limit:
+                            return user_comments
+            return user_comments
+        except Exception as exc:
+            self.logger.warning("Không thể lấy lịch sử comment: %s", exc)
+            return []
 
     def _parse_fb_time(self, value: str) -> datetime:
         try:
@@ -49,12 +107,9 @@ class CommentFetcher:
         except Exception:
             return datetime.utcnow()
 
-    def _fetch_graph_comments(self, limit: int) -> List[Comment]:
-        # Sử dụng TokenManager để lấy token hợp lệ (tự động refresh nếu cần)
-        if self.token_manager:
-            token = self.token_manager.get_valid_token()
-        else:
-            token = self.cfg.get("graph_access_token")
+    def _fetch_graph_comments(self, limit: int, retry: int = 3) -> List[Comment]:
+        # Đọc token trực tiếp từ config (long-lived 60 days)
+        token = self.cfg.get("graph_access_token")
 
         page_id = self.cfg.get("page_id")
         if not token or not page_id:
@@ -62,6 +117,39 @@ class CommentFetcher:
 
         comments: List[Comment] = []
         version = self.cfg.get("graph_version", "v17.0")
+
+        def handle_rate_limit(exc: requests.HTTPError, attempt: int) -> bool:
+            """Xử lý rate limit với exponential backoff. Returns True nếu nên retry."""
+            if exc.response is None:
+                return False
+            try:
+                error_data = exc.response.json().get("error", {})
+                error_code = error_data.get("code")
+                error_subcode = error_data.get("error_subcode")
+
+                # Rate limit error codes: 4, 17, 32, 613
+                if error_code in {4, 17, 32, 613}:
+                    wait_time = min(60 * (2**attempt), 300)  # Max 5 minutes
+                    self.logger.warning(
+                        "⏱️  Rate limited (code %s), waiting %ds before retry %d/%d",
+                        error_code,
+                        wait_time,
+                        attempt + 1,
+                        retry,
+                    )
+                    time.sleep(wait_time)
+                    return True
+                # Token expired
+                elif error_code == 190:
+                    self.logger.error(
+                        "❌ Token expired (subcode %s)\n"
+                        "   → Vui lòng cập nhật token mới trong .env hoặc config.json",
+                        error_subcode,
+                    )
+                    return False  # Không retry vì token hết hạn
+            except Exception:
+                pass
+            return False
 
         def fetch_posts(endpoint: str) -> List[dict]:
             url = f"https://graph.facebook.com/{version}/{page_id}/{endpoint}"
@@ -86,36 +174,64 @@ class CommentFetcher:
 
         try:
             posts = []
-            try:
-                posts = fetch_posts("published_posts")
-            except requests.HTTPError as exc:
-                body = exc.response.text if exc.response is not None else ""
-                self.logger.warning("published_posts failed: %s | body=%s", exc, body)
-                posts = fetch_posts("posts")
+            for attempt in range(retry):
+                try:
+                    posts = fetch_posts("published_posts")
+                    break
+                except requests.HTTPError as exc:
+                    if handle_rate_limit(exc, attempt) and attempt < retry - 1:
+                        continue
+                    body = exc.response.text if exc.response is not None else ""
+                    self.logger.warning(
+                        "published_posts failed: %s | body=%s", exc, body
+                    )
+                    try:
+                        posts = fetch_posts("posts")
+                        break
+                    except requests.HTTPError:
+                        if attempt < retry - 1:
+                            time.sleep(5)
+                        else:
+                            raise
 
             for post in posts:
                 post_id = post["id"]
-                try:
-                    data = fetch_comments_for_post(post_id)
-                except requests.HTTPError as exc:
-                    body = exc.response.text if exc.response is not None else ""
-                    self.logger.warning(
-                        "comments fetch failed for %s: %s | body=%s", post_id, exc, body
-                    )
-                    continue
+                for attempt in range(retry):
+                    try:
+                        data = fetch_comments_for_post(post_id)
+                        break
+                    except requests.HTTPError as exc:
+                        if handle_rate_limit(exc, attempt) and attempt < retry - 1:
+                            continue
+                        body = exc.response.text if exc.response is not None else ""
+                        self.logger.warning(
+                            "comments fetch failed for %s: %s | body=%s",
+                            post_id,
+                            exc,
+                            body,
+                        )
+                        if attempt < retry - 1:
+                            time.sleep(2)
+                        else:
+                            data = []
+                            break
 
                 for c in data:
                     cid = c.get("id")
-                    if not cid or cid in self._seen:
+                    if not cid:
                         continue
+
+                    # Thread-safe check và add
+                    with self._seen_lock:
+                        if cid in self._seen:
+                            continue
+                        self._seen.add(cid)
 
                     author_info = c.get("from") or {}
                     if author_info.get("id") == page_id:
                         # Skip bot/self comments
-                        self._seen.add(cid)
                         continue
 
-                    self._seen.add(cid)
                     comments.append(
                         Comment(
                             id=cid,
@@ -155,8 +271,13 @@ class CommentFetcher:
             elements = page.query_selector_all("div[aria-label='Comment']")[:limit]
             for el in elements:
                 cid = el.get_attribute("data-commentid") or f"pw-{len(comments)+1}"
-                if cid in self._seen:
-                    continue
+
+                # Thread-safe check và add
+                with self._seen_lock:
+                    if cid in self._seen:
+                        continue
+                    self._seen.add(cid)
+
                 author = el.get_attribute("data-commenter") or "Unknown"
                 message = el.inner_text()
                 comments.append(
@@ -171,7 +292,6 @@ class CommentFetcher:
                         raw={"playwright": True},
                     )
                 )
-                self._seen.add(cid)
                 if len(comments) >= limit:
                     break
             page.close()
@@ -207,9 +327,11 @@ class CommentFetcher:
                     created_at=datetime.utcnow(),
                 ),
             ]
-            new_items = [c for c in samples if c.id not in self._seen][:limit]
-            for c in new_items:
-                self._seen.add(c.id)
+            new_items = []
+            with self._seen_lock:
+                new_items = [c for c in samples if c.id not in self._seen][:limit]
+                for c in new_items:
+                    self._seen.add(c.id)
             return new_items
 
         comments = self._fetch_graph_comments(limit)

@@ -867,21 +867,36 @@ class ModernUI(QMainWindow):
     def _create_actions_table(self) -> QTableWidget:
         self.actions_table = QTableWidget()
         self.actions_table.setObjectName("dataTable")
-        self.actions_table.setColumnCount(4)
+        self.actions_table.setColumnCount(6)  # Tăng từ 4 lên 6 cột
         self.actions_table.setHorizontalHeaderLabels(
             [
-                self._t("table_author"),
-                self._t("table_intent"),
-                self._t("table_actions"),
-                self._t("table_detail"),
+                "Avatar",
+                self._t("table_author"),  # Tên người dùng
+                "Nội dung",  # Nội dung comment
+                self._t("table_intent"),  # Ý định
+                self._t("table_actions"),  # Hành động
+                "Trả lời của AI",  # Reply của AI
             ]
         )
 
         header = self.actions_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
-        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)
+        header.setSectionResizeMode(
+            0, QHeaderView.ResizeMode.Fixed
+        )  # Avatar - fixed 80px
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)  # Tên
+        header.setSectionResizeMode(
+            2, QHeaderView.ResizeMode.Stretch
+        )  # Nội dung - stretch
+        header.setSectionResizeMode(
+            3, QHeaderView.ResizeMode.ResizeToContents
+        )  # Ý định
+        header.setSectionResizeMode(
+            4, QHeaderView.ResizeMode.ResizeToContents
+        )  # Hành động
+        header.setSectionResizeMode(5, QHeaderView.ResizeMode.Stretch)  # Trả lời AI
+
+        # Set fixed width cho cột Avatar
+        self.actions_table.setColumnWidth(0, 80)
 
         self.actions_table.verticalHeader().setVisible(False)
         self.actions_table.setAlternatingRowColors(True)
@@ -979,22 +994,57 @@ class ModernUI(QMainWindow):
         display = filtered[-50:] if filtered else []
         self.actions_table.setRowCount(len(display))
         for row, item in enumerate(display):
-            self.actions_table.setItem(
-                row, 0, QTableWidgetItem(str(item.get("author", "")))
+            # Cột 0: Avatar URL (hiển thị text link)
+            avatar_url = item.get("avatar_url", "")
+            avatar_text = (
+                avatar_url[:50] + "..."
+                if avatar_url and len(avatar_url) > 50
+                else (avatar_url or "(không có)")
             )
+            self.actions_table.setItem(row, 0, QTableWidgetItem(avatar_text))
+
+            # Cột 1: Tên người dùng
+            author = item.get("author", "unknown")
+            self.actions_table.setItem(row, 1, QTableWidgetItem(str(author)))
+
+            # Cột 2: Nội dung comment
+            message = item.get("message", "")
+            # Giới hạn 100 ký tự
+            message_display = message[:100] + "..." if len(message) > 100 else message
+            self.actions_table.setItem(row, 2, QTableWidgetItem(message_display))
+
+            # Cột 3: Ý định
             self.actions_table.setItem(
-                row, 1, QTableWidgetItem(self._intent_label(item.get("intent")))
+                row, 3, QTableWidgetItem(self._intent_label(item.get("intent")))
             )
+
+            # Cột 4: Hành động
             self.actions_table.setItem(
                 row,
-                2,
+                4,
                 QTableWidgetItem(
                     ", ".join(self._action_labels(item.get("actions", [])))
                 ),
             )
-            self.actions_table.setItem(
-                row, 3, QTableWidgetItem(str(item.get("detail", "")))
-            )
+
+            # Cột 5: Trả lời của AI (lấy từ reply_text field)
+            reply_text = item.get("reply_text", "")
+            detail = str(item.get("detail", ""))
+
+            # Nếu có reply_text thì hiển thị, không thì parse detail
+            if reply_text:
+                ai_reply = (
+                    reply_text[:100] + "..." if len(reply_text) > 100 else reply_text
+                )
+            elif "graph reply ok" in detail:
+                ai_reply = "✅ Đã trả lời thành công"
+            elif "demo reply" in detail:
+                ai_reply = "🧪 Demo mode - chưa reply thật"
+            elif "graph hide ok" in detail:
+                ai_reply = "🚫 Đã ẩn comment"
+            else:
+                ai_reply = detail[:100] + "..." if len(detail) > 100 else detail
+            self.actions_table.setItem(row, 5, QTableWidgetItem(ai_reply))
 
     def load_dashboard_data(self):
         report = load_latest_report()

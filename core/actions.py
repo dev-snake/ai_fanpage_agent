@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time
 from typing import List, Optional
 
 import requests
@@ -10,7 +11,6 @@ from .ai_engine import ActionType, Decision
 from .comments import Comment
 from .inbox import InboxService
 from .post import PostService
-from .token_manager import TokenManager
 
 
 class ActionExecutor:
@@ -19,7 +19,6 @@ class ActionExecutor:
         settings: dict,
         logger: logging.Logger,
         context: Optional[BrowserContext] = None,
-        token_manager: Optional[TokenManager] = None,
     ) -> None:
         self.settings = settings
         self.logger = logger.getChild("actions")
@@ -27,60 +26,147 @@ class ActionExecutor:
         self.post_service = PostService(logger=self.logger)
         self.context = context
         self.graph_version = settings.get("graph_version", "v17.0")
-        self.token_manager = token_manager
 
-    def execute(self, comment: Comment, decision: Decision) -> List[str]:
-        details: List[str] = []
+    def execute(self, comment: Comment, decision: Decision) -> List[tuple[str, str]]:
+        """Execute actions và return list of (status, reply_text) tuples"""
+        results: List[tuple[str, str]] = []
+        reply_text = decision.reply_text or ""
+
         for action in decision.actions:
             if action == ActionType.HIDE:
-                details.append(self.hide_comment(comment))
-            elif action == ActionType.REPLY and decision.reply_text:
-                details.append(self.reply_comment(comment, decision.reply_text))
+                status = self.hide_comment(comment)
+                results.append((status, ""))
+            elif action == ActionType.REPLY and reply_text:
+                status = self.reply_comment(comment, reply_text)
+                results.append((status, reply_text))  # Bao gồm reply text
             elif action == ActionType.OPEN_INBOX:
-                msg = decision.reply_text or "Chào bạn, mình hỗ trợ nhé?"
-                details.append(self.inbox_message(comment, msg))
-        return details
+                msg = reply_text or "Chào bạn, mình hỗ trợ nhé?"
+                status = self.inbox_message(comment, msg)
+                results.append((status, msg))
+        return results
 
     # ---------- Graph API helpers ----------
-    def _graph_reply(self, comment: Comment, text: str) -> str:
-        # Lấy token hợp lệ từ TokenManager
-        if self.token_manager:
-            token = self.token_manager.get_valid_token()
-        else:
-            token = self.settings.get("graph_access_token")
+    def _graph_reply(self, comment: Comment, text: str, retry: int = 3) -> str:
+        # Đọc token từ config (long-lived 60 days)
+        token = self.settings.get("graph_access_token")
 
         if not token:
             return "missing graph_access_token"
+
         url = f"https://graph.facebook.com/{self.graph_version}/{comment.id}/comments"
-        # Add is_hidden=false to ensure reply is publicly visible
-        resp = requests.post(
-            url,
-            params={
-                "access_token": token,
-                "message": text,
-                "is_hidden": "false",  # Force public visibility
-            },
-        )
-        if resp.ok:
-            reply_id = resp.json().get("id")
-            self.logger.info("Reply posted with ID: %s", reply_id)
-            return "graph reply ok"
-        return f"graph reply failed: {resp.status_code} {resp.text}"
 
-    def _graph_hide(self, comment: Comment) -> str:
-        # Lấy token hợp lệ từ TokenManager
-        if self.token_manager:
-            token = self.token_manager.get_valid_token()
-        else:
-            token = self.settings.get("graph_access_token")
+        for attempt in range(retry):
+            try:
+                # Add is_hidden=false to ensure reply is publicly visible
+                resp = requests.post(
+                    url,
+                    params={
+                        "access_token": token,
+                        "message": text,
+                        "is_hidden": "false",  # Force public visibility
+                    },
+                    timeout=10,
+                )
+                if resp.ok:
+                    reply_id = resp.json().get("id")
+                    self.logger.info("Reply posted with ID: %s", reply_id)
+                    return "graph reply ok"
+
+                # Check rate limit
+                error_data = resp.json().get("error", {})
+                error_code = error_data.get("code")
+
+                if error_code in {4, 17, 32, 613} and attempt < retry - 1:
+                    wait_time = min(60 * (2**attempt), 300)
+                    self.logger.warning(
+                        "⏱️  Rate limited on reply (code %s), waiting %ds...",
+                        error_code,
+                        wait_time,
+                    )
+                    time.sleep(wait_time)
+                    # Refresh token nếu cần
+                    if self.token_manager:
+                        token = self.token_manager.get_valid_token()
+                    continue
+                elif error_code == 190 and attempt < retry - 1:
+                    self.logger.warning("🔄 Token expired, refreshing...")
+                    if self.token_manager:
+                        token = self.token_manager.get_valid_token(force_refresh=True)
+                    time.sleep(2)
+                    continue
+
+                return f"graph reply failed: {resp.status_code} {resp.text}"
+
+            except requests.Timeout:
+                if attempt < retry - 1:
+                    self.logger.warning("⏱️  Timeout on reply, retrying...")
+                    time.sleep(5)
+                    continue
+                return "graph reply failed: timeout"
+            except Exception as exc:
+                if attempt < retry - 1:
+                    time.sleep(2)
+                    continue
+                return f"graph reply failed: {exc}"
+
+        return "graph reply failed: max retries exceeded"
+
+    def _graph_hide(self, comment: Comment, retry: int = 3) -> str:
+        # Đọc token từ config (long-lived 60 days)
+        token = self.settings.get("graph_access_token")
 
         if not token:
             return "missing graph_access_token"
+
         url = f"https://graph.facebook.com/{self.graph_version}/{comment.id}"
-        resp = requests.post(url, params={"access_token": token, "is_hidden": "true"})
-        if resp.ok:
-            return "graph hide ok"
-        return f"graph hide failed: {resp.status_code} {resp.text}"
+
+        for attempt in range(retry):
+            try:
+                resp = requests.post(
+                    url,
+                    params={"access_token": token, "is_hidden": "true"},
+                    timeout=10,
+                )
+                if resp.ok:
+                    return "graph hide ok"
+
+                # Check rate limit
+                error_data = resp.json().get("error", {})
+                error_code = error_data.get("code")
+
+                if error_code in {4, 17, 32, 613} and attempt < retry - 1:
+                    wait_time = min(60 * (2**attempt), 300)
+                    self.logger.warning(
+                        "⏱️  Rate limited on hide (code %s), waiting %ds...",
+                        error_code,
+                        wait_time,
+                    )
+                    time.sleep(wait_time)
+                    if self.token_manager:
+                        token = self.token_manager.get_valid_token()
+                    continue
+                elif error_code == 190 and attempt < retry - 1:
+                    self.logger.warning("🔄 Token expired, refreshing...")
+                    if self.token_manager:
+                        token = self.token_manager.get_valid_token(force_refresh=True)
+                    time.sleep(2)
+                    continue
+
+                return f"graph hide failed: {resp.status_code} {resp.text}"
+
+            except requests.Timeout:
+                if attempt < retry - 1:
+                    self.logger.warning("⏱️  Timeout on hide, retrying...")
+                    time.sleep(5)
+                    continue
+                return "graph hide failed: timeout"
+            except Exception as exc:
+                if attempt < retry - 1:
+                    time.sleep(2)
+                    continue
+                return f"graph hide failed: {exc}"
+
+        return "graph hide failed: max retries exceeded"
 
     # ---------- Playwright helpers (fallback) ----------
     def _pw_reply(self, comment: Comment, text: str) -> str:
@@ -122,7 +208,7 @@ class ActionExecutor:
             return f"playwright hide failed: {exc}"
 
     def hide_comment(self, comment: Comment) -> str:
-        if self.settings.get("demo", True):
+        if self.settings.get("demo", False):  # Mặc định False
             self.logger.info("[demo] Hide comment %s", comment.id)
             return "demo hide"
         if self.settings.get("graph_access_token"):
@@ -134,7 +220,7 @@ class ActionExecutor:
         return result
 
     def reply_comment(self, comment: Comment, text: str) -> str:
-        if self.settings.get("demo", True):
+        if self.settings.get("demo", False):  # Mặc định False
             self.logger.info("[demo] Reply to %s: %s", comment.id, text)
             return "demo reply"
         if self.settings.get("graph_access_token"):
@@ -147,8 +233,8 @@ class ActionExecutor:
 
     def inbox_message(self, comment: Comment, text: str) -> str:
         return self.inbox.send_message(
-            comment.author, text, demo=self.settings.get("demo", True)
+            comment.author, text, demo=self.settings.get("demo", False)
         )
 
     def create_post(self, caption: str) -> str:
-        return self.post_service.create(caption, demo=self.settings.get("demo", True))
+        return self.post_service.create(caption, demo=self.settings.get("demo", False))

@@ -51,11 +51,13 @@ class Database:
                 message TEXT,
                 intent TEXT,
                 actions TEXT,
-                detail TEXT
+                detail TEXT,
+                reply_text TEXT
             )
         """
         )
         self._ensure_created_at_column()
+        self._ensure_reply_text_column()
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_actions_comment_id ON actions(comment_id)"
         )
@@ -96,6 +98,19 @@ class Database:
             # Best-effort; continue with whatever schema exists.
             pass
 
+    def _ensure_reply_text_column(self) -> None:
+        """Add reply_text column if not exists."""
+        try:
+            cols = {
+                row["name"]
+                for row in self.conn.execute("PRAGMA table_info(actions)").fetchall()
+            }
+            if "reply_text" not in cols:
+                self.conn.execute("ALTER TABLE actions ADD COLUMN reply_text TEXT")
+                self.conn.commit()
+        except Exception:
+            pass
+
     def _repair_actions_table(self) -> None:
         """Fallback: rebuild actions table if legacy schema causes syntax errors."""
         try:
@@ -112,7 +127,11 @@ class Database:
         except Exception:
             pass
 
-        source_time = "created_at" if "created_at" in cols else ("timestamp" if "timestamp" in cols else None)
+        source_time = (
+            "created_at"
+            if "created_at" in cols
+            else ("timestamp" if "timestamp" in cols else None)
+        )
         try:
             self.conn.execute(
                 """
@@ -126,7 +145,8 @@ class Database:
                     message TEXT,
                     intent TEXT,
                     actions TEXT,
-                    detail TEXT
+                    detail TEXT,
+                    reply_text TEXT
                 )
             """
             )
@@ -142,10 +162,11 @@ class Database:
                     "intent" if "intent" in cols else "NULL",
                     "actions" if "actions" in cols else "'[]'",
                     "detail" if "detail" in cols else "NULL",
+                    "reply_text" if "reply_text" in cols else "NULL",
                 ]
                 copy_sql = f"""
                     INSERT INTO actions_rebuild (
-                        created_at, comment_id, post_id, author, avatar_url, message, intent, actions, detail
+                        created_at, comment_id, post_id, author, avatar_url, message, intent, actions, detail, reply_text
                     )
                     SELECT {', '.join(select_cols)} FROM actions
                 """
@@ -213,6 +234,7 @@ class Database:
         intent: str,
         actions: Sequence[str],
         detail: str,
+        reply_text: str = "",
         timestamp: datetime | None = None,
     ) -> None:
         ts = (timestamp or datetime.utcnow()).isoformat()
@@ -221,9 +243,9 @@ class Database:
             """
             INSERT INTO actions (
                 created_at, comment_id, post_id, author, avatar_url,
-                message, intent, actions, detail
+                message, intent, actions, detail, reply_text
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
             (
                 ts,
@@ -235,6 +257,7 @@ class Database:
                 intent,
                 actions_json,
                 detail,
+                reply_text,
             ),
         )
         self.conn.commit()
@@ -251,6 +274,14 @@ class Database:
             action_list = json.loads(row["actions"] or "[]")
         except json.JSONDecodeError:
             action_list = []
+
+        # Handle reply_text column (may not exist in old DB)
+        reply_text = ""
+        try:
+            reply_text = row["reply_text"] or ""
+        except Exception:
+            pass
+
         return {
             "id": row["id"],
             "timestamp": row["created_at"],
@@ -262,6 +293,7 @@ class Database:
             "intent": row["intent"],
             "actions": action_list,
             "detail": row["detail"],
+            "reply_text": reply_text,
         }
 
     def _day_clause(self, day: Optional[str | date]) -> tuple[str, list[str]]:
